@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python:*)",
+      "Bash(if [ -f .env ])",
+      "Bash(then echo \"✅ .env file exists\")",
+      "Bash(cat:*)",
+      "Bash(else echo \"❌ .env file not found\")",
+      "Bash(fi)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(echo:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

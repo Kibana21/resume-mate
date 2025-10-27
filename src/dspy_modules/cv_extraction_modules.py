@@ -5,17 +5,22 @@ Modules are composable components that use signatures to perform extraction task
 They can be optimized using DSPy teleprompters for better performance.
 """
 
+import logging
 import dspy
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from .cv_signatures import (
     PersonalInfoExtraction,
     ProfessionalSummaryExtraction,
     WorkExperienceExtraction,
     WorkExperienceWithEvidence,
+    WorkExperienceListExtraction,
     EducationExtraction,
     EducationWithEvidence,
+    EducationListExtraction,
     TechnicalSkillsExtraction,
     SkillsWithProficiency,
     DomainSkillsExtraction,
@@ -33,6 +38,8 @@ from .cv_signatures import (
     StrictPersonalInfoExtraction,
     StrictSkillExtraction,
 )
+from .achievement_extraction import ComprehensiveAchievementAnalyzer
+from .skill_proficiency import ComprehensiveSkillProficiencyAnalyzer
 
 
 # ============================================================================
@@ -61,17 +68,8 @@ class PersonalInfoExtractor(dspy.Module):
         Returns:
             Prediction with extracted personal info fields
         """
-        if self.strict_mode:
-            instructions = (
-                "Extract ONLY information that is EXPLICITLY stated. "
-                "Do NOT infer or guess. Use 'NOT_FOUND' if information is not clearly present."
-            )
-            return self.extractor(
-                personal_section=personal_section,
-                instructions=instructions
-            )
-        else:
-            return self.extractor(personal_section=personal_section)
+        # Instructions are now in the signature's docstring
+        return self.extractor(personal_section=personal_section)
 
 
 class ProfessionalSummaryExtractor(dspy.Module):
@@ -139,6 +137,47 @@ class BatchWorkExperienceExtractor(dspy.Module):
         return results
 
 
+class WorkExperienceListExtractor(dspy.Module):
+    """Extract ALL work experience entries from full CV text."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(WorkExperienceListExtraction)
+
+    def forward(self, cv_text: str) -> List[Dict[str, Any]]:
+        """
+        Extract all work experience from full CV text.
+
+        Args:
+            cv_text: Full CV text
+
+        Returns:
+            List of work experience dictionaries
+        """
+        import json
+
+        result = self.extractor(cv_text=cv_text)
+
+        # Parse JSON output
+        try:
+            work_experiences = json.loads(result.work_experiences_json)
+            if not isinstance(work_experiences, list):
+                return []
+            return work_experiences
+        except json.JSONDecodeError:
+            # Try to extract JSON from the text
+            import re
+            json_match = re.search(r'\[.*\]', result.work_experiences_json, re.DOTALL)
+            if json_match:
+                try:
+                    work_experiences = json.loads(json_match.group())
+                    if isinstance(work_experiences, list):
+                        return work_experiences
+                except json.JSONDecodeError:
+                    pass
+            return []
+
+
 # ============================================================================
 # EDUCATION MODULE
 # ============================================================================
@@ -174,6 +213,47 @@ class BatchEducationExtractor(dspy.Module):
             result = self.single_extractor(education_text=entry)
             results.append(result)
         return results
+
+
+class EducationListExtractor(dspy.Module):
+    """Extract ALL education entries from full CV text."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(EducationListExtraction)
+
+    def forward(self, cv_text: str) -> List[Dict[str, Any]]:
+        """
+        Extract all education from full CV text.
+
+        Args:
+            cv_text: Full CV text
+
+        Returns:
+            List of education dictionaries
+        """
+        import json
+
+        result = self.extractor(cv_text=cv_text)
+
+        # Parse JSON output
+        try:
+            education_entries = json.loads(result.education_entries_json)
+            if not isinstance(education_entries, list):
+                return []
+            return education_entries
+        except json.JSONDecodeError:
+            # Try to extract JSON from the text
+            import re
+            json_match = re.search(r'\[.*\]', result.education_entries_json, re.DOTALL)
+            if json_match:
+                try:
+                    education_entries = json.loads(json_match.group())
+                    if isinstance(education_entries, list):
+                        return education_entries
+                except json.JSONDecodeError:
+                    pass
+            return []
 
 
 # ============================================================================
@@ -230,18 +310,8 @@ class SkillVerifier(dspy.Module):
 
     def forward(self, cv_text: str, target_skill: str) -> dspy.Prediction:
         """Verify if candidate has specific skill."""
-        if self.strict_mode:
-            instructions = (
-                "STRICT MODE: Only return 'Yes' if the EXACT skill name or clear synonym "
-                "is EXPLICITLY mentioned. Do NOT infer from related skills."
-            )
-            return self.verifier(
-                cv_text=cv_text,
-                target_skill=target_skill,
-                instructions=instructions
-            )
-        else:
-            return self.verifier(cv_text=cv_text, target_skill=target_skill)
+        # Instructions are now in the signature's docstring
+        return self.verifier(cv_text=cv_text, target_skill=target_skill)
 
 
 class BatchSkillVerifier(dspy.Module):
@@ -445,7 +515,9 @@ class ComprehensiveCVExtractor(dspy.Module):
         self.personal_info_extractor = PersonalInfoExtractor(strict_mode=strict_mode)
         self.summary_extractor = ProfessionalSummaryExtractor()
         self.work_exp_extractor = BatchWorkExperienceExtractor(with_evidence=with_evidence)
+        self.work_exp_list_extractor = WorkExperienceListExtractor()
         self.education_extractor = BatchEducationExtractor(with_evidence=with_evidence)
+        self.education_list_extractor = EducationListExtractor()
         self.technical_skills_extractor = TechnicalSkillsExtractor()
         self.skills_proficiency_extractor = SkillsWithProficiencyExtractor()
         self.certification_extractor = CertificationListExtractor()
@@ -465,6 +537,12 @@ class ComprehensiveCVExtractor(dspy.Module):
         self.industry_domain = industry_domain
         if industry_domain:
             self.domain_skills_extractor = DomainSkillsExtractor()
+
+        # Achievement metrics extractor
+        self.achievement_analyzer = ComprehensiveAchievementAnalyzer()
+
+        # Skill proficiency analyzer
+        self.skill_proficiency_analyzer = ComprehensiveSkillProficiencyAnalyzer()
 
     def forward(
         self,
@@ -519,14 +597,49 @@ class ComprehensiveCVExtractor(dspy.Module):
             work_exp = self.work_exp_extractor(experience_entries=work_entries)
             results["work_experience"] = work_exp
         else:
-            results["work_experience"] = []
+            # Use list extractor to find work experience from full CV
+            work_exp_list = self.work_exp_list_extractor(cv_text=cv_text)
+            results["work_experience"] = work_exp_list
+            results["work_experience_raw"] = work_exp_list  # Store raw extraction
+
+        # Step 4.5: Analyze achievement metrics from work experience
+        achievement_metrics_by_exp = {}
+        for i, exp in enumerate(results["work_experience"]):
+            # Get achievements for this experience
+            if isinstance(exp, dict):
+                achievements = exp.get('achievements', [])
+                company = exp.get('company_name', '')
+                title = exp.get('job_title', '')
+            else:
+                achievements = getattr(exp, 'achievements', [])
+                company = getattr(exp, 'company_name', '')
+                title = getattr(exp, 'job_title', '')
+
+            # Analyze achievements if present
+            if achievements:
+                try:
+                    metrics = self.achievement_analyzer.analyze_achievements(
+                        achievements=achievements,
+                        company_name=company,
+                        job_title=title
+                    )
+                    achievement_metrics_by_exp[i] = metrics
+                except Exception as e:
+                    # Log but don't fail extraction
+                    logger.warning(f"Failed to analyze achievements: {e}")
+                    achievement_metrics_by_exp[i] = []
+
+        results["achievement_metrics"] = achievement_metrics_by_exp
 
         # Step 5: Extract education
         if education_entries:
             education = self.education_extractor(education_entries=education_entries)
             results["education"] = education
         else:
-            results["education"] = []
+            # Use list extractor to find education from full CV
+            education_list = self.education_list_extractor(cv_text=cv_text)
+            results["education"] = education_list
+            results["education_raw"] = education_list  # Store raw extraction
 
         # Step 6: Extract skills
         technical_skills = self.technical_skills_extractor(
@@ -553,15 +666,94 @@ class ComprehensiveCVExtractor(dspy.Module):
         results["certifications"] = certifications
 
         # Step 8: Calculate experience
-        # Create work history summary for calculation
-        work_history_summary = " | ".join([
-            f"{exp.job_title} @ {exp.company_name} ({exp.start_date} - {exp.end_date})"
-            for exp in results["work_experience"]
-            if hasattr(exp, 'job_title')
-        ]) if results["work_experience"] else cv_text[:1000]
+        # Create work history summary for calculation (handle both dict and object formats)
+        work_history_entries = []
+        for exp in results["work_experience"]:
+            if isinstance(exp, dict):
+                # Dict format from list extractor
+                job_title = exp.get('job_title', 'Unknown')
+                company = exp.get('company_name', 'Unknown')
+                start = exp.get('start_date', 'Unknown')
+                end = exp.get('end_date', 'Present')
+                work_history_entries.append(f"{job_title} @ {company} ({start} - {end})")
+            elif hasattr(exp, 'job_title'):
+                # Object format from batch extractor
+                work_history_entries.append(f"{exp.job_title} @ {exp.company_name} ({exp.start_date} - {exp.end_date})")
+
+        work_history_summary = " | ".join(work_history_entries) if work_history_entries else cv_text[:1000]
 
         total_exp = self.experience_calculator(work_history=work_history_summary)
         results["total_experience"] = total_exp
+
+        # Step 8.5: Analyze skill proficiency (after total experience is calculated)
+        # Collect all skills into a flat list
+        all_skills = set()
+
+        # From technical skills (use correct field names from TechnicalSkillsExtraction signature)
+        if hasattr(technical_skills, 'programming_languages'):
+            langs = getattr(technical_skills, 'programming_languages', '')
+            if langs and langs.lower() != 'none':
+                all_skills.update([s.strip() for s in langs.split(',') if s.strip()])
+
+        if hasattr(technical_skills, 'frameworks_libraries'):
+            frameworks = getattr(technical_skills, 'frameworks_libraries', '')
+            if frameworks and frameworks.lower() != 'none':
+                all_skills.update([s.strip() for s in frameworks.split(',') if s.strip()])
+
+        if hasattr(technical_skills, 'tools_platforms'):
+            tools = getattr(technical_skills, 'tools_platforms', '')
+            if tools and tools.lower() != 'none':
+                all_skills.update([s.strip() for s in tools.split(',') if s.strip()])
+
+        if hasattr(technical_skills, 'databases'):
+            dbs = getattr(technical_skills, 'databases', '')
+            if dbs and dbs.lower() != 'none':
+                all_skills.update([s.strip() for s in dbs.split(',') if s.strip()])
+
+        if hasattr(technical_skills, 'cloud_services'):
+            cloud = getattr(technical_skills, 'cloud_services', '')
+            if cloud and cloud.lower() != 'none':
+                all_skills.update([s.strip() for s in cloud.split(',') if s.strip()])
+
+        # Extract total years from total_exp result
+        total_years = None
+        if hasattr(total_exp, 'total_years'):
+            try:
+                total_years = float(getattr(total_exp, 'total_years', 0))
+            except (ValueError, TypeError):
+                total_years = None
+
+        # Analyze proficiency for each skill
+        if all_skills and results["work_experience"]:
+            try:
+                # Convert work experiences to dicts if they're dspy.Prediction objects
+                work_exp_dicts = []
+                for exp in results["work_experience"]:
+                    if isinstance(exp, dict):
+                        work_exp_dicts.append(exp)
+                    else:
+                        # Convert dspy.Prediction to dict
+                        exp_dict = {
+                            'company_name': getattr(exp, 'company_name', ''),
+                            'job_title': getattr(exp, 'job_title', ''),
+                            'start_date': getattr(exp, 'start_date', None),
+                            'end_date': getattr(exp, 'end_date', None),
+                            'technologies_used': getattr(exp, 'technologies_used', []),
+                            'responsibilities': getattr(exp, 'responsibilities', [])
+                        }
+                        work_exp_dicts.append(exp_dict)
+
+                skill_proficiency_analysis = self.skill_proficiency_analyzer.analyze_skills(
+                    skills=list(all_skills),
+                    work_experiences=work_exp_dicts,
+                    total_years_experience=total_years
+                )
+                results["skill_proficiency_analysis"] = skill_proficiency_analysis
+            except Exception as e:
+                logger.warning(f"Failed to analyze skill proficiency: {e}")
+                results["skill_proficiency_analysis"] = []
+        else:
+            results["skill_proficiency_analysis"] = []
 
         # Step 9: Division classification
         cv_summary = f"{summary.professional_summary if hasattr(summary, 'professional_summary') else ''} | " \

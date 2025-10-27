@@ -369,14 +369,10 @@ class StrictRequirementExtractor(dspy.Module):
         requirement_type: str,
     ) -> dspy.Prediction:
         """Extract requirements strictly."""
-        instructions = (
-            "STRICT MODE: Extract ONLY requirements that are EXPLICITLY and CLEARLY stated. "
-            "Do NOT infer, interpret, or expand. Use 'NOT_FOUND' if not explicitly mentioned."
-        )
+        # Instructions are now in the signature's docstring
         return self.extractor(
             jd_text=jd_text,
             requirement_type=requirement_type,
-            instructions=instructions,
         )
 
 

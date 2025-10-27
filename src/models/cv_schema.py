@@ -62,6 +62,29 @@ class CertificationStatus(str, Enum):
     IN_PROGRESS = "in_progress"
 
 
+class MetricType(str, Enum):
+    """Types of quantifiable metrics in achievements"""
+    PERCENTAGE = "percentage"
+    CURRENCY = "currency"
+    TIME_DURATION = "time_duration"
+    COUNT = "count"
+    RATIO = "ratio"
+    MULTIPLIER = "multiplier"
+
+
+class ImpactCategory(str, Enum):
+    """Categories of business impact"""
+    COST_SAVINGS = "cost_savings"
+    REVENUE_GENERATION = "revenue_generation"
+    PERFORMANCE_IMPROVEMENT = "performance_improvement"
+    TIME_REDUCTION = "time_reduction"
+    QUALITY_IMPROVEMENT = "quality_improvement"
+    TEAM_GROWTH = "team_growth"
+    PROCESS_OPTIMIZATION = "process_optimization"
+    CUSTOMER_SATISFACTION = "customer_satisfaction"
+    RISK_MITIGATION = "risk_mitigation"
+
+
 # ============================================================================
 # PERSONAL INFORMATION MODELS
 # ============================================================================
@@ -78,8 +101,9 @@ class PersonalInfo(BaseModel):
 
     phone: Optional[str] = Field(
         None,
-        description="Primary phone number in international format",
-        pattern=r"^\+?[1-9]\d{1,14}$"
+        description="Primary phone number (LLM-normalized, may contain +, digits, spaces, hyphens, parentheses)",
+        min_length=7,
+        max_length=30
     )
 
     location: Optional[str] = Field(
@@ -128,6 +152,49 @@ class PersonalInfo(BaseModel):
 # WORK EXPERIENCE MODELS
 # ============================================================================
 
+class AchievementMetric(BaseModel):
+    """Quantifiable metric extracted from an achievement"""
+
+    raw_text: str = Field(..., description="Original achievement text")
+
+    metric_value: Optional[float] = Field(
+        None,
+        description="Numeric value of the metric (e.g., 26, 200, 250000)"
+    )
+
+    metric_type: Optional[MetricType] = Field(
+        None,
+        description="Type of metric (percentage, currency, time, count, etc.)"
+    )
+
+    metric_unit: Optional[str] = Field(
+        None,
+        description="Unit of measurement (e.g., 'percent', 'USD', 'months', 'developers')"
+    )
+
+    impact_category: Optional[ImpactCategory] = Field(
+        None,
+        description="Category of business impact"
+    )
+
+    confidence: float = Field(
+        default=0.0,
+        description="Confidence score for this metric extraction (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+
+    context: Optional[str] = Field(
+        None,
+        description="Additional context about the achievement"
+    )
+
+    is_quantifiable: bool = Field(
+        default=False,
+        description="Whether this achievement contains quantifiable metrics"
+    )
+
+
 class WorkExperience(BaseModel):
     """Single work experience entry"""
 
@@ -173,7 +240,12 @@ class WorkExperience(BaseModel):
 
     achievements: List[str] = Field(
         default_factory=list,
-        description="Quantifiable achievements and accomplishments"
+        description="Quantifiable achievements and accomplishments (raw text)"
+    )
+
+    achievement_metrics: List[AchievementMetric] = Field(
+        default_factory=list,
+        description="Structured achievement metrics with quantified impact"
     )
 
     technologies_used: List[str] = Field(
@@ -321,6 +393,29 @@ class Skill(BaseModel):
     related_skills: List[str] = Field(
         default_factory=list,
         description="Related or complementary skills"
+    )
+
+    mentioned_count: int = Field(
+        default=0,
+        description="Number of times skill appears in CV",
+        ge=0
+    )
+
+    usage_context: List[str] = Field(
+        default_factory=list,
+        description="Companies/projects where this skill was used"
+    )
+
+    first_used_date: Optional[date] = Field(
+        None,
+        description="First professional use of this skill (from work history)"
+    )
+
+    proficiency_confidence: float = Field(
+        default=0.0,
+        description="Confidence in proficiency level assessment (0-1)",
+        ge=0.0,
+        le=1.0
     )
 
 
@@ -503,7 +598,7 @@ class Award(BaseModel):
 
     issuer: str = Field(..., description="Organization that issued award")
 
-    date: Optional[date] = Field(
+    award_date: Optional[date] = Field(
         None,
         description="Date award was received"
     )
@@ -662,6 +757,34 @@ class CandidateProfile(BaseModel):
     secondary_divisions: List[str] = Field(
         default_factory=list,
         description="Secondary AIA divisions where candidate could fit"
+    )
+
+    # HR Insights
+    career_progression_analysis: Optional[str] = Field(
+        None,
+        description="Analysis of career progression and growth trajectory"
+    )
+
+    job_hopping_assessment: Optional[str] = Field(
+        None,
+        description="Assessment of job stability and tenure patterns"
+    )
+
+    red_flags: Optional[str] = Field(
+        None,
+        description="Potential concerns or red flags identified in CV"
+    )
+
+    quality_score: Optional[float] = Field(
+        None,
+        description="Overall CV quality score (0-100)",
+        ge=0,
+        le=100
+    )
+
+    key_strengths: Optional[str] = Field(
+        None,
+        description="Key strengths and unique selling points of the candidate"
     )
 
     # Metadata

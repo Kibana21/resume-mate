@@ -1,9 +1,20 @@
 """Application settings using Pydantic BaseSettings"""
 
 from functools import lru_cache
-from typing import List, Literal
+from typing import List, Union
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
+from pathlib import Path
+
+# Load .env file explicitly to ensure all environment variables are available
+# This is needed for variables not defined in Settings class (e.g., Azure Document Intelligence)
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+except ImportError:
+    pass  # dotenv not installed, environment variables must be set manually
 
 
 class Settings(BaseSettings):
@@ -14,18 +25,15 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = Field(default=False, env="DEBUG")
 
-    # LLM Configuration
-    llm_provider: Literal["openai", "anthropic", "azure"] = Field(
-        default="openai", env="LLM_PROVIDER"
-    )
-    llm_model: str = Field(default="gpt-4-turbo-preview", env="LLM_MODEL")
+    # Azure OpenAI Configuration
+    azure_openai_api_key: str = Field(default="", env="AZURE_OPENAI_API_KEY")
+    azure_openai_endpoint: str = Field(default="", env="AZURE_OPENAI_ENDPOINT")
+    azure_openai_deployment_name: str = Field(default="gpt-4", env="AZURE_OPENAI_DEPLOYMENT_NAME")
+    azure_openai_api_version: str = Field(default="2024-02-15-preview", env="AZURE_OPENAI_API_VERSION")
+
+    # LLM Parameters
     llm_temperature: float = Field(default=0.0, env="LLM_TEMPERATURE")
     llm_max_tokens: int = Field(default=4000, env="LLM_MAX_TOKENS")
-
-    # API Keys
-    openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
-    anthropic_api_key: str = Field(default="", env="ANTHROPIC_API_KEY")
-    azure_openai_api_key: str = Field(default="", env="AZURE_OPENAI_API_KEY")
 
     # Database
     database_url: str = Field(
@@ -53,7 +61,7 @@ class Settings(BaseSettings):
 
     # Security
     secret_key: str = Field(default="change-me-in-production", env="SECRET_KEY")
-    allowed_origins: List[str] = Field(
+    allowed_origins: Union[List[str], str] = Field(
         default=["http://localhost:3000", "http://localhost:8000"],
         env="ALLOWED_ORIGINS",
     )
@@ -61,12 +69,28 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
     jwt_expiration_minutes: int = Field(default=60, env="JWT_EXPIRATION_MINUTES")
 
+    @field_validator('allowed_origins', mode='before')
+    @classmethod
+    def parse_allowed_origins(cls, v):
+        """Parse allowed_origins from string or list"""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(',')]
+        return v
+
     # File Storage
     upload_dir: str = Field(default="./data/uploads", env="UPLOAD_DIR")
     max_upload_size_mb: int = Field(default=10, env="MAX_UPLOAD_SIZE_MB")
-    allowed_extensions: List[str] = Field(
+    allowed_extensions: Union[List[str], str] = Field(
         default=[".pdf", ".docx", ".doc", ".txt"], env="ALLOWED_EXTENSIONS"
     )
+
+    @field_validator('allowed_extensions', mode='before')
+    @classmethod
+    def parse_allowed_extensions(cls, v):
+        """Parse allowed_extensions from string or list"""
+        if isinstance(v, str):
+            return [ext.strip() for ext in v.split(',')]
+        return v
 
     # Feature Flags
     enable_ocr: bool = Field(default=True, env="ENABLE_OCR")
@@ -113,6 +137,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields in .env
 
 
 @lru_cache()

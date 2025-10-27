@@ -168,18 +168,40 @@ class CVExtractionPipeline:
         """
         Parse CV file to text.
 
-        TODO: Implement actual file parsing with PDF/DOCX parsers.
+        Uses Azure Document Intelligence if available (better structure preservation),
+        otherwise falls back to basic PDF/DOCX parsing.
 
         Args:
             file_path: Path to file
 
         Returns:
-            Extracted text
+            Extracted text (markdown format if using Document Intelligence)
         """
-        # Placeholder implementation
-        # In production, use libraries like PyPDF2, pdfplumber, python-docx
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            return f.read()
+        from src.preprocessing import (
+            parse_file,
+            is_azure_document_intelligence_available,
+            parse_pdf_via_images,
+        )
+
+        # Try Azure Document Intelligence with image-based approach (extracts all pages)
+        if is_azure_document_intelligence_available() and file_path.endswith('.pdf'):
+            try:
+                logger.info("Using Azure Document Intelligence (image-based) for PDF parsing...")
+                markdown_content = parse_pdf_via_images(file_path)
+                logger.info(f"Successfully parsed PDF to markdown ({len(markdown_content)} chars)")
+                return markdown_content
+            except Exception as e:
+                logger.warning(
+                    f"Azure Document Intelligence parsing failed: {e}. "
+                    f"Falling back to basic PDF parsing."
+                )
+                # Fall through to basic parsing
+
+        # Fallback to basic PDF/DOCX parsing
+        logger.info("Using pdfplumber for PDF/DOCX parsing...")
+        full_text = parse_file(file_path)
+        logger.info(f"Extracted {len(full_text)} characters")
+        return full_text
 
     def _convert_to_pydantic(
         self,
@@ -231,6 +253,88 @@ class CVExtractionPipeline:
         summary_result = extraction_results.get("professional_summary", {})
         career_level = getattr(summary_result, "career_level", None)
 
+        # Extract HR insights if available
+        career_progression = None
+        job_hopping = None
+        red_flags_text = None
+        quality_score_value = None
+        key_strengths_text = None
+
+        if self.with_hr_insights:
+            # Career progression - build summary from multiple fields
+            career_prog_result = extraction_results.get("career_progression", {})
+            if career_prog_result:
+                trajectory = getattr(career_prog_result, "trajectory", "Unknown")
+                rate = getattr(career_prog_result, "progression_rate", "Unknown")
+                promotions = getattr(career_prog_result, "number_of_promotions", "0")
+                tenure = getattr(career_prog_result, "average_tenure_months", "Unknown")
+                summary = getattr(career_prog_result, "summary", "")
+
+                career_progression = f"Trajectory: {trajectory} | Progression Rate: {rate} | Promotions: {promotions} | Avg Tenure: {tenure} months | {summary}"
+            else:
+                career_progression = None
+
+            # Job hopping - build assessment from multiple fields
+            job_hopping_result = extraction_results.get("job_hopping", {})
+            if job_hopping_result:
+                is_hopping = getattr(job_hopping_result, "is_job_hopping", "Unknown")
+                details = getattr(job_hopping_result, "job_hopping_details", "")
+                gaps = getattr(job_hopping_result, "employment_gaps", "None")
+
+                job_hopping = f"Job Hopping: {is_hopping} | Details: {details} | Employment Gaps: {gaps}"
+            else:
+                job_hopping = None
+
+            # Red flags
+            red_flags_result = extraction_results.get("red_flags", {})
+            if red_flags_result:
+                flags = getattr(red_flags_result, "red_flags", None)
+                severity = getattr(red_flags_result, "severity_levels", "")
+
+                if flags:
+                    red_flags_text = f"{flags} | Severity: {severity}" if severity else flags
+                else:
+                    red_flags_text = None
+            else:
+                red_flags_text = None
+
+            # Quality score - calculate average from multiple scores
+            quality_result = extraction_results.get("quality_score", {})
+            if quality_result:
+                formatting = getattr(quality_result, "formatting_score", "0")
+                completeness = getattr(quality_result, "completeness_score", "0")
+                content = getattr(quality_result, "content_quality_score", "0")
+
+                try:
+                    scores = [float(s) for s in [formatting, completeness, content] if s and s != "0"]
+                    if scores:
+                        quality_score_value = sum(scores) / len(scores)
+                    else:
+                        quality_score_value = None
+                except (ValueError, TypeError):
+                    quality_score_value = None
+            else:
+                quality_score_value = None
+
+            # Key strengths - combine all strength categories
+            strengths_result = extraction_results.get("key_strengths", {})
+            if strengths_result:
+                technical = getattr(strengths_result, "technical_strengths", "")
+                leadership = getattr(strengths_result, "leadership_strengths", "")
+                usp = getattr(strengths_result, "unique_selling_points", "")
+
+                parts = []
+                if technical:
+                    parts.append(f"Technical: {technical}")
+                if leadership:
+                    parts.append(f"Leadership: {leadership}")
+                if usp:
+                    parts.append(f"USP: {usp}")
+
+                key_strengths_text = " | ".join(parts) if parts else None
+            else:
+                key_strengths_text = None
+
         # Create metadata
         metadata = CVMetadata(
             extraction_timestamp=datetime.now().isoformat(),
@@ -248,6 +352,11 @@ class CVExtractionPipeline:
             primary_division=primary_division,
             secondary_divisions=secondary_divisions,
             career_level=career_level,
+            career_progression_analysis=career_progression,
+            job_hopping_assessment=job_hopping,
+            red_flags=red_flags_text,
+            quality_score=quality_score_value,
+            key_strengths=key_strengths_text,
             metadata=metadata,
             raw_text=cv_text,
         )
@@ -260,23 +369,72 @@ class CVExtractionPipeline:
         return getattr(summary_result, "professional_summary", None)
 
     def _extract_work_experience(self, extraction_results: Dict[str, Any]) -> List[WorkExperience]:
-        """Extract work experience list."""
+        """Extract work experience list with achievement metrics."""
+        from src.models.cv_schema import AchievementMetric, MetricType, ImpactCategory
+
         work_exp_results = extraction_results.get("work_experience", [])
+        achievement_metrics_by_exp = extraction_results.get("achievement_metrics", {})
         work_experiences = []
 
-        for exp in work_exp_results:
+        for idx, exp in enumerate(work_exp_results):
             try:
-                work_exp = WorkExperience(
-                    company_name=getattr(exp, "company_name", "Unknown"),
-                    job_title=getattr(exp, "job_title", "Unknown"),
-                    start_date=self._parse_date(getattr(exp, "start_date", None)),
-                    end_date=self._parse_date(getattr(exp, "end_date", None)),
-                    is_current=self._is_current(getattr(exp, "end_date", None)),
-                    location=self._clean_field(getattr(exp, "location", None)),
-                    responsibilities=self._parse_list(getattr(exp, "responsibilities", "")),
-                    achievements=self._parse_list(getattr(exp, "achievements", "")),
-                    technologies_used=self._parse_list(getattr(exp, "technologies", "")),
-                )
+                # Get achievement metrics for this experience
+                exp_metrics = achievement_metrics_by_exp.get(idx, [])
+                achievement_metric_objects = []
+
+                # Convert metrics to Pydantic models
+                for metric in exp_metrics:
+                    try:
+                        # Map confidence string to float
+                        confidence_map = {'high': 0.9, 'medium': 0.7, 'low': 0.4}
+                        confidence_str = metric.get('confidence', 'medium')
+                        if isinstance(confidence_str, str):
+                            confidence = confidence_map.get(confidence_str.lower(), 0.5)
+                        else:
+                            confidence = float(confidence_str)
+
+                        achievement_metric = AchievementMetric(
+                            raw_text=metric.get('raw_text', ''),
+                            metric_value=metric.get('metric_value'),
+                            metric_type=MetricType(metric['metric_type']) if metric.get('metric_type') else None,
+                            metric_unit=metric.get('metric_unit'),
+                            impact_category=ImpactCategory(metric['impact_category']) if metric.get('impact_category') else None,
+                            confidence=confidence,
+                            context=metric.get('context'),
+                            is_quantifiable=metric.get('has_metrics', False)
+                        )
+                        achievement_metric_objects.append(achievement_metric)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse achievement metric: {e}")
+
+                # Handle both dict (from list extractor) and object (from batch extractor)
+                if isinstance(exp, dict):
+                    work_exp = WorkExperience(
+                        company_name=exp.get("company_name", "Unknown"),
+                        job_title=exp.get("job_title", "Unknown"),
+                        start_date=self._parse_date(exp.get("start_date")),
+                        end_date=self._parse_date(exp.get("end_date")),
+                        is_current=self._is_current(exp.get("end_date")),
+                        location=self._clean_field(exp.get("location")),
+                        responsibilities=self._parse_list(exp.get("responsibilities", "")),
+                        achievements=self._parse_list(exp.get("achievements", "")),
+                        achievement_metrics=achievement_metric_objects,
+                        technologies_used=self._parse_list(exp.get("technologies", "")),
+                    )
+                else:
+                    # Handle object format
+                    work_exp = WorkExperience(
+                        company_name=getattr(exp, "company_name", "Unknown"),
+                        job_title=getattr(exp, "job_title", "Unknown"),
+                        start_date=self._parse_date(getattr(exp, "start_date", None)),
+                        end_date=self._parse_date(getattr(exp, "end_date", None)),
+                        is_current=self._is_current(getattr(exp, "end_date", None)),
+                        location=self._clean_field(getattr(exp, "location", None)),
+                        responsibilities=self._parse_list(getattr(exp, "responsibilities", "")),
+                        achievements=self._parse_list(getattr(exp, "achievements", "")),
+                        achievement_metrics=achievement_metric_objects,
+                        technologies_used=self._parse_list(getattr(exp, "technologies", "")),
+                    )
                 work_experiences.append(work_exp)
             except Exception as e:
                 logger.warning(f"Failed to parse work experience: {e}")
@@ -290,16 +448,30 @@ class CVExtractionPipeline:
 
         for edu in edu_results:
             try:
-                education = Education(
-                    institution_name=getattr(edu, "institution_name", "Unknown"),
-                    degree=getattr(edu, "degree", "Unknown"),
-                    field_of_study=self._clean_field(getattr(edu, "field_of_study", None)),
-                    start_date=self._parse_date(getattr(edu, "start_date", None)),
-                    end_date=self._parse_date(getattr(edu, "end_date", None)),
-                    is_current=self._is_current(getattr(edu, "end_date", None)),
-                    gpa=self._parse_gpa(getattr(edu, "gpa", None)),
-                    honors=self._parse_list(getattr(edu, "honors", "")),
-                )
+                # Handle both dict (from list extractor) and object (from batch extractor)
+                if isinstance(edu, dict):
+                    education = Education(
+                        institution_name=edu.get("institution_name", "Unknown"),
+                        degree=edu.get("degree", "Unknown"),
+                        field_of_study=self._clean_field(edu.get("field_of_study")),
+                        start_date=self._parse_date(edu.get("start_date")),
+                        end_date=self._parse_date(edu.get("end_date")),
+                        is_current=self._is_current(edu.get("end_date")),
+                        gpa=self._parse_gpa(edu.get("gpa")),
+                        honors=self._parse_list(edu.get("honors", "")),
+                    )
+                else:
+                    # Handle object format
+                    education = Education(
+                        institution_name=getattr(edu, "institution_name", "Unknown"),
+                        degree=getattr(edu, "degree", "Unknown"),
+                        field_of_study=self._clean_field(getattr(edu, "field_of_study", None)),
+                        start_date=self._parse_date(getattr(edu, "start_date", None)),
+                        end_date=self._parse_date(getattr(edu, "end_date", None)),
+                        is_current=self._is_current(getattr(edu, "end_date", None)),
+                        gpa=self._parse_gpa(getattr(edu, "gpa", None)),
+                        honors=self._parse_list(getattr(edu, "honors", "")),
+                    )
                 educations.append(education)
             except Exception as e:
                 logger.warning(f"Failed to parse education: {e}")
@@ -307,7 +479,9 @@ class CVExtractionPipeline:
         return educations
 
     def _extract_skills(self, extraction_results: Dict[str, Any]) -> List[Skill]:
-        """Extract skills list."""
+        """Extract skills list with proficiency analysis."""
+        from src.models.cv_schema import ProficiencyLevel
+
         skills = []
 
         # Get technical skills
@@ -331,11 +505,37 @@ class CVExtractionPipeline:
             skills.extend(self._parse_skills_from_field(domain_skills, "domain_expertise", SkillCategory.DOMAIN))
             skills.extend(self._parse_skills_from_field(domain_skills, "business_skills", SkillCategory.SOFT))
 
-        # Deduplicate by name
+        # Deduplicate by name and merge proficiency analysis
         unique_skills = {}
         for skill in skills:
             if skill.name not in unique_skills:
                 unique_skills[skill.name] = skill
+
+        # Enrich with proficiency analysis data
+        proficiency_analysis = extraction_results.get("skill_proficiency_analysis", [])
+        for analysis in proficiency_analysis:
+            skill_name = analysis.get('skill_name', '')
+            if skill_name in unique_skills:
+                skill = unique_skills[skill_name]
+
+                # Map proficiency level string to enum
+                prof_level_str = analysis.get('proficiency_level', '').lower()
+                prof_level_map = {
+                    'beginner': ProficiencyLevel.BEGINNER,
+                    'intermediate': ProficiencyLevel.INTERMEDIATE,
+                    'advanced': ProficiencyLevel.ADVANCED,
+                    'expert': ProficiencyLevel.EXPERT
+                }
+                if prof_level_str in prof_level_map:
+                    skill.proficiency_level = prof_level_map[prof_level_str]
+
+                # Add calculated fields
+                skill.years_of_experience = analysis.get('years_of_experience', 0.0)
+                skill.first_used_date = analysis.get('first_used')
+                skill.last_used = analysis.get('last_used')
+                skill.usage_context = analysis.get('usage_context', [])
+                skill.mentioned_count = analysis.get('mentioned_count', 1)
+                skill.proficiency_confidence = analysis.get('proficiency_confidence', 0.0)
 
         return list(unique_skills.values())
 
@@ -469,7 +669,7 @@ class CVExtractionPipeline:
         return [item.strip() for item in items if item.strip() and item.strip() != "None"]
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[date]:
-        """Parse date string to date object."""
+        """Parse date string to date object with flexible format handling."""
         if not date_str or date_str == "None" or date_str == "NOT_FOUND":
             return None
 
@@ -477,12 +677,34 @@ class CVExtractionPipeline:
             return None
 
         try:
-            # Try YYYY-MM format
-            if "-" in date_str:
+            # Handle YYYY-MM-DD format first
+            if date_str.count("-") == 2:
                 parts = date_str.split("-")
                 year = int(parts[0])
-                month = int(parts[1]) if len(parts) > 1 else 1
-                return date(year, month, 1)
+                month = int(parts[1])
+                day = int(parts[2])
+                return date(year, month, day)
+            # Handle YYYY-MM or YYYY-Season format
+            elif "-" in date_str:
+                parts = date_str.split("-")
+                year = int(parts[0])
+
+                # Try to parse month as integer
+                try:
+                    month = int(parts[1])
+                    return date(year, month, 1)
+                except ValueError:
+                    # Handle season names (Summer, Fall, Winter, Spring) or text
+                    season_month_map = {
+                        'spring': 3,
+                        'summer': 6,
+                        'fall': 9,
+                        'autumn': 9,
+                        'winter': 12
+                    }
+                    month_name = parts[1].lower().strip()
+                    month = season_month_map.get(month_name, 1)
+                    return date(year, month, 1)
             # Try YYYY format
             else:
                 return date(int(date_str), 1, 1)

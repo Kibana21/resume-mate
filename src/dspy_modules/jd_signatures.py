@@ -593,7 +593,7 @@ class MatchingWeightRecommendation(dspy.Signature):
 # ============================================================================
 
 class StrictRequirementExtraction(dspy.Signature):
-    """Extract requirements in strict mode - only explicitly stated."""
+    """Extract requirements in strict mode - only explicitly stated. STRICT MODE: Extract ONLY requirements that are EXPLICITLY and CLEARLY stated. Do NOT infer, interpret, or expand. Use 'NOT_FOUND' if not explicitly mentioned."""
 
     jd_text: str = dspy.InputField(
         desc="Job description requirements section"
@@ -601,10 +601,6 @@ class StrictRequirementExtraction(dspy.Signature):
 
     requirement_type: str = dspy.InputField(
         desc="Type of requirement to extract: 'skills', 'education', 'experience', or 'certifications'"
-    )
-
-    instructions: str = dspy.InputField(
-        desc="STRICT MODE: Extract ONLY requirements that are EXPLICITLY and CLEARLY stated. Do NOT infer, interpret, or expand. Use 'NOT_FOUND' if not explicitly mentioned."
     )
 
     required_items: str = dspy.OutputField(

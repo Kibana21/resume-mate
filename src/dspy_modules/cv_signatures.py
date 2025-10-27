@@ -29,7 +29,7 @@ class PersonalInfoExtraction(dspy.Signature):
     )
 
     phone: str = dspy.OutputField(
-        desc="Phone number (or 'None' if not found)"
+        desc="Primary phone number in standard format. If multiple numbers separated by '/' or ',', return ONLY the first one. Example: '+91-8368423820' not '+91-8368423820/+91-8554828962' (or 'None' if not found)"
     )
 
     location: str = dspy.OutputField(
@@ -149,6 +149,32 @@ class WorkExperienceWithEvidence(dspy.Signature):
     )
 
 
+class WorkExperienceListExtraction(dspy.Signature):
+    """Extract ALL work experience entries from full CV text.
+
+    Identify and extract each work experience entry as a structured JSON object.
+    """
+
+    cv_text: str = dspy.InputField(
+        desc="Full CV text containing work experience section"
+    )
+
+    work_experiences_json: str = dspy.OutputField(
+        desc="""JSON array of work experience objects. Each object must have:
+        {
+          "company_name": "company name",
+          "job_title": "job title",
+          "start_date": "YYYY-MM or YYYY (normalize: Summer→06, Fall→09, Winter→12, Spring→03)",
+          "end_date": "YYYY-MM or YYYY or Present (normalize: Summer→06, Fall→09, Winter→12, Spring→03)",
+          "location": "city, country or None",
+          "responsibilities": "bullet point 1 | bullet point 2 | ...",
+          "achievements": "achievement 1 | achievement 2 | ... or None",
+          "technologies": "tech1, tech2, tech3 or None"
+        }
+        Return empty array [] if no work experience found."""
+    )
+
+
 # ============================================================================
 # EDUCATION EXTRACTION
 # ============================================================================
@@ -173,11 +199,11 @@ class EducationExtraction(dspy.Signature):
     )
 
     start_date: str = dspy.OutputField(
-        desc="Start date in YYYY-MM format (or 'None' if not found)"
+        desc="Start date in YYYY-MM or YYYY format (normalize: Summer→06, Fall→09, Winter→12, Spring→03, or 'None' if not found)"
     )
 
     end_date: str = dspy.OutputField(
-        desc="End date in YYYY-MM format, or 'Present' if current, or 'None' if not found"
+        desc="End date in YYYY-MM or YYYY format (normalize: Summer→06, Fall→09, Winter→12, Spring→03), or 'Present' if current, or 'None' if not found"
     )
 
     gpa: str = dspy.OutputField(
@@ -218,6 +244,31 @@ class EducationWithEvidence(dspy.Signature):
 
     gpa: str = dspy.OutputField(
         desc="GPA if mentioned, format as 'X.X/Y.Y' or 'None'"
+    )
+
+
+class EducationListExtraction(dspy.Signature):
+    """Extract ALL education entries from full CV text.
+
+    Identify and extract each education entry as a structured JSON object.
+    """
+
+    cv_text: str = dspy.InputField(
+        desc="Full CV text containing education section"
+    )
+
+    education_entries_json: str = dspy.OutputField(
+        desc="""JSON array of education objects. Each object must have:
+        {
+          "institution_name": "university/school name",
+          "degree": "degree type (e.g., Bachelor of Science, MBA)",
+          "field_of_study": "major/specialization",
+          "start_date": "YYYY or YYYY-MM (normalize: Summer→06, Fall→09, Winter→12, Spring→03) or None",
+          "end_date": "YYYY or YYYY-MM (normalize: Summer→06, Fall→09, Winter→12, Spring→03) or Present or None",
+          "gpa": "X.X/Y.Y or None",
+          "honors": "honor1, honor2 or None"
+        }
+        Return empty array [] if no education found."""
     )
 
 
@@ -638,14 +689,10 @@ class CVSectionDetection(dspy.Signature):
 # ============================================================================
 
 class StrictPersonalInfoExtraction(dspy.Signature):
-    """Extract personal information in strict mode - only explicitly stated information."""
+    """Extract personal information in strict mode - only explicitly stated information. Extract ONLY information that is EXPLICITLY stated. Do NOT infer or guess. Use 'NOT_FOUND' if information is not clearly present."""
 
     personal_section: str = dspy.InputField(
         desc="Personal information section text from CV"
-    )
-
-    instructions: str = dspy.InputField(
-        desc="Strict mode instructions: Extract ONLY information that is EXPLICITLY stated. Do NOT infer or guess. Use 'NOT_FOUND' if information is not clearly present."
     )
 
     full_name: str = dspy.OutputField(
@@ -657,7 +704,7 @@ class StrictPersonalInfoExtraction(dspy.Signature):
     )
 
     phone: str = dspy.OutputField(
-        desc="Phone number EXACTLY as written (or 'NOT_FOUND')"
+        desc="Primary phone number. If multiple numbers are present, return ONLY the first one (or 'NOT_FOUND')"
     )
 
     location: str = dspy.OutputField(
@@ -666,7 +713,7 @@ class StrictPersonalInfoExtraction(dspy.Signature):
 
 
 class StrictSkillExtraction(dspy.Signature):
-    """Extract skills in strict mode - only explicitly mentioned skills."""
+    """Extract skills in strict mode - only explicitly mentioned skills. STRICT MODE: Only return 'Yes' if the EXACT skill name or clear synonym is EXPLICITLY mentioned. Do NOT infer from related skills."""
 
     cv_text: str = dspy.InputField(
         desc="Full CV text or skills section"
@@ -674,10 +721,6 @@ class StrictSkillExtraction(dspy.Signature):
 
     target_skill: str = dspy.InputField(
         desc="Specific skill to verify"
-    )
-
-    instructions: str = dspy.InputField(
-        desc="STRICT MODE: Only return 'Yes' if the EXACT skill name or clear synonym is EXPLICITLY mentioned. Do NOT infer from related skills."
     )
 
     skill_found: str = dspy.OutputField(

@@ -1,0 +1,19 @@
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║           📄 PLACE YOUR RESUME.PDF HERE                      ║
+║                                                              ║
+║  1. Copy your resume to this directory:                     ║
+║     resume-mate/data/sample_cvs/resume.pdf                  ║
+║                                                              ║
+║  2. Run extraction:                                          ║
+║     python scripts/extract_cv.py data/sample_cvs/resume.pdf ║
+║                                                              ║
+║  3. View results in console or save to file:                ║
+║     python scripts/extract_cv.py data/sample_cvs/resume.pdf \║
+║         --output data/outputs/result.json                    ║
+║                                                              ║
+║  Supported formats: PDF, DOCX, DOC, TXT                     ║
+║                                                              ║
+║  See HOW_TO_RUN.md for complete instructions                ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
