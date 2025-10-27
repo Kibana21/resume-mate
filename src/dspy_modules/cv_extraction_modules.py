@@ -1,0 +1,608 @@
+"""
+DSPy modules for CV extraction.
+
+Modules are composable components that use signatures to perform extraction tasks.
+They can be optimized using DSPy teleprompters for better performance.
+"""
+
+import dspy
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+
+from .cv_signatures import (
+    PersonalInfoExtraction,
+    ProfessionalSummaryExtraction,
+    WorkExperienceExtraction,
+    WorkExperienceWithEvidence,
+    EducationExtraction,
+    EducationWithEvidence,
+    TechnicalSkillsExtraction,
+    SkillsWithProficiency,
+    DomainSkillsExtraction,
+    SkillWithEvidenceExtraction,
+    CertificationExtraction,
+    CertificationListExtraction,
+    DivisionClassification,
+    CareerProgressionAnalysis,
+    JobHoppingDetection,
+    RedFlagDetection,
+    QualityScoring,
+    KeyStrengthsExtraction,
+    TotalExperienceCalculation,
+    CVSectionDetection,
+    StrictPersonalInfoExtraction,
+    StrictSkillExtraction,
+)
+
+
+# ============================================================================
+# PERSONAL INFORMATION MODULE
+# ============================================================================
+
+class PersonalInfoExtractor(dspy.Module):
+    """Extract personal and contact information from CV."""
+
+    def __init__(self, strict_mode: bool = False):
+        super().__init__()
+        self.strict_mode = strict_mode
+
+        if strict_mode:
+            self.extractor = dspy.ChainOfThought(StrictPersonalInfoExtraction)
+        else:
+            self.extractor = dspy.ChainOfThought(PersonalInfoExtraction)
+
+    def forward(self, personal_section: str) -> dspy.Prediction:
+        """
+        Extract personal information.
+
+        Args:
+            personal_section: Text containing personal information
+
+        Returns:
+            Prediction with extracted personal info fields
+        """
+        if self.strict_mode:
+            instructions = (
+                "Extract ONLY information that is EXPLICITLY stated. "
+                "Do NOT infer or guess. Use 'NOT_FOUND' if information is not clearly present."
+            )
+            return self.extractor(
+                personal_section=personal_section,
+                instructions=instructions
+            )
+        else:
+            return self.extractor(personal_section=personal_section)
+
+
+class ProfessionalSummaryExtractor(dspy.Module):
+    """Extract and refine professional summary."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(ProfessionalSummaryExtraction)
+
+    def forward(self, summary_section: str) -> dspy.Prediction:
+        """Extract professional summary."""
+        return self.extractor(summary_section=summary_section)
+
+
+# ============================================================================
+# WORK EXPERIENCE MODULE
+# ============================================================================
+
+class WorkExperienceExtractor(dspy.Module):
+    """Extract work experience entries."""
+
+    def __init__(self, with_evidence: bool = False):
+        super().__init__()
+        self.with_evidence = with_evidence
+
+        if with_evidence:
+            self.extractor = dspy.ChainOfThought(WorkExperienceWithEvidence)
+        else:
+            self.extractor = dspy.ChainOfThought(WorkExperienceExtraction)
+
+    def forward(self, experience_text: str) -> dspy.Prediction:
+        """
+        Extract single work experience entry.
+
+        Args:
+            experience_text: Text of one work experience entry
+
+        Returns:
+            Prediction with extracted work experience fields
+        """
+        return self.extractor(experience_text=experience_text)
+
+
+class BatchWorkExperienceExtractor(dspy.Module):
+    """Extract multiple work experience entries."""
+
+    def __init__(self, with_evidence: bool = False):
+        super().__init__()
+        self.single_extractor = WorkExperienceExtractor(with_evidence=with_evidence)
+
+    def forward(self, experience_entries: List[str]) -> List[dspy.Prediction]:
+        """
+        Extract multiple work experiences.
+
+        Args:
+            experience_entries: List of work experience text blocks
+
+        Returns:
+            List of predictions for each entry
+        """
+        results = []
+        for entry in experience_entries:
+            result = self.single_extractor(experience_text=entry)
+            results.append(result)
+        return results
+
+
+# ============================================================================
+# EDUCATION MODULE
+# ============================================================================
+
+class EducationExtractor(dspy.Module):
+    """Extract education entries."""
+
+    def __init__(self, with_evidence: bool = False):
+        super().__init__()
+        self.with_evidence = with_evidence
+
+        if with_evidence:
+            self.extractor = dspy.ChainOfThought(EducationWithEvidence)
+        else:
+            self.extractor = dspy.ChainOfThought(EducationExtraction)
+
+    def forward(self, education_text: str) -> dspy.Prediction:
+        """Extract single education entry."""
+        return self.extractor(education_text=education_text)
+
+
+class BatchEducationExtractor(dspy.Module):
+    """Extract multiple education entries."""
+
+    def __init__(self, with_evidence: bool = False):
+        super().__init__()
+        self.single_extractor = EducationExtractor(with_evidence=with_evidence)
+
+    def forward(self, education_entries: List[str]) -> List[dspy.Prediction]:
+        """Extract multiple education entries."""
+        results = []
+        for entry in education_entries:
+            result = self.single_extractor(education_text=entry)
+            results.append(result)
+        return results
+
+
+# ============================================================================
+# SKILLS MODULE
+# ============================================================================
+
+class TechnicalSkillsExtractor(dspy.Module):
+    """Extract technical skills."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(TechnicalSkillsExtraction)
+
+    def forward(self, skills_section: str) -> dspy.Prediction:
+        """Extract technical skills."""
+        return self.extractor(skills_section=skills_section)
+
+
+class SkillsWithProficiencyExtractor(dspy.Module):
+    """Extract skills with proficiency levels."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(SkillsWithProficiency)
+
+    def forward(self, skills_text: str) -> dspy.Prediction:
+        """Extract skills categorized by proficiency."""
+        return self.extractor(skills_text=skills_text)
+
+
+class DomainSkillsExtractor(dspy.Module):
+    """Extract domain-specific skills."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(DomainSkillsExtraction)
+
+    def forward(self, cv_text: str, industry_domain: str) -> dspy.Prediction:
+        """Extract domain-specific skills."""
+        return self.extractor(cv_text=cv_text, industry_domain=industry_domain)
+
+
+class SkillVerifier(dspy.Module):
+    """Verify if candidate has a specific skill with evidence."""
+
+    def __init__(self, strict_mode: bool = False):
+        super().__init__()
+        self.strict_mode = strict_mode
+
+        if strict_mode:
+            self.verifier = dspy.ChainOfThought(StrictSkillExtraction)
+        else:
+            self.verifier = dspy.ChainOfThought(SkillWithEvidenceExtraction)
+
+    def forward(self, cv_text: str, target_skill: str) -> dspy.Prediction:
+        """Verify if candidate has specific skill."""
+        if self.strict_mode:
+            instructions = (
+                "STRICT MODE: Only return 'Yes' if the EXACT skill name or clear synonym "
+                "is EXPLICITLY mentioned. Do NOT infer from related skills."
+            )
+            return self.verifier(
+                cv_text=cv_text,
+                target_skill=target_skill,
+                instructions=instructions
+            )
+        else:
+            return self.verifier(cv_text=cv_text, target_skill=target_skill)
+
+
+class BatchSkillVerifier(dspy.Module):
+    """Verify multiple skills at once."""
+
+    def __init__(self, strict_mode: bool = False):
+        super().__init__()
+        self.single_verifier = SkillVerifier(strict_mode=strict_mode)
+
+    def forward(self, cv_text: str, target_skills: List[str]) -> Dict[str, dspy.Prediction]:
+        """Verify multiple skills."""
+        results = {}
+        for skill in target_skills:
+            results[skill] = self.single_verifier(cv_text=cv_text, target_skill=skill)
+        return results
+
+
+# ============================================================================
+# CERTIFICATIONS MODULE
+# ============================================================================
+
+class CertificationExtractor(dspy.Module):
+    """Extract individual certification."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(CertificationExtraction)
+
+    def forward(self, certification_text: str) -> dspy.Prediction:
+        """Extract single certification."""
+        return self.extractor(certification_text=certification_text)
+
+
+class CertificationListExtractor(dspy.Module):
+    """Extract all certifications from CV."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(CertificationListExtraction)
+
+    def forward(self, cv_text: str) -> dspy.Prediction:
+        """Extract all certifications."""
+        return self.extractor(cv_text=cv_text)
+
+
+# ============================================================================
+# DIVISION CLASSIFICATION MODULE
+# ============================================================================
+
+class DivisionClassifier(dspy.Module):
+    """Classify candidate to AIA business divisions."""
+
+    def __init__(self):
+        super().__init__()
+        self.classifier = dspy.ChainOfThought(DivisionClassification)
+
+    def forward(
+        self,
+        cv_summary: str,
+        available_divisions: str
+    ) -> dspy.Prediction:
+        """Classify to divisions."""
+        return self.classifier(
+            cv_summary=cv_summary,
+            available_divisions=available_divisions
+        )
+
+
+# ============================================================================
+# HR INSIGHTS MODULES
+# ============================================================================
+
+class CareerProgressionAnalyzer(dspy.Module):
+    """Analyze career progression patterns."""
+
+    def __init__(self):
+        super().__init__()
+        self.analyzer = dspy.ChainOfThought(CareerProgressionAnalysis)
+
+    def forward(self, work_history: str) -> dspy.Prediction:
+        """Analyze career progression."""
+        return self.analyzer(work_history=work_history)
+
+
+class JobHoppingDetector(dspy.Module):
+    """Detect job hopping and employment gaps."""
+
+    def __init__(self):
+        super().__init__()
+        self.detector = dspy.ChainOfThought(JobHoppingDetection)
+
+    def forward(self, work_history: str) -> dspy.Prediction:
+        """Detect job hopping patterns."""
+        return self.detector(work_history=work_history)
+
+
+class RedFlagDetector(dspy.Module):
+    """Detect potential red flags in CV."""
+
+    def __init__(self):
+        super().__init__()
+        self.detector = dspy.ChainOfThought(RedFlagDetection)
+
+    def forward(
+        self,
+        cv_content: str,
+        work_history_summary: str
+    ) -> dspy.Prediction:
+        """Detect red flags."""
+        return self.detector(
+            cv_content=cv_content,
+            work_history_summary=work_history_summary
+        )
+
+
+class QualityScorer(dspy.Module):
+    """Score CV quality and completeness."""
+
+    def __init__(self):
+        super().__init__()
+        self.scorer = dspy.ChainOfThought(QualityScoring)
+
+    def forward(self, cv_text: str) -> dspy.Prediction:
+        """Score CV quality."""
+        return self.scorer(cv_text=cv_text)
+
+
+class KeyStrengthsExtractor(dspy.Module):
+    """Extract key strengths and unique selling points."""
+
+    def __init__(self):
+        super().__init__()
+        self.extractor = dspy.ChainOfThought(KeyStrengthsExtraction)
+
+    def forward(
+        self,
+        cv_text: str,
+        target_role_context: str = "General"
+    ) -> dspy.Prediction:
+        """Extract key strengths."""
+        return self.extractor(
+            cv_text=cv_text,
+            target_role_context=target_role_context
+        )
+
+
+# ============================================================================
+# EXPERIENCE CALCULATION MODULE
+# ============================================================================
+
+class TotalExperienceCalculator(dspy.Module):
+    """Calculate total years of experience."""
+
+    def __init__(self):
+        super().__init__()
+        self.calculator = dspy.ChainOfThought(TotalExperienceCalculation)
+
+    def forward(self, work_history: str) -> dspy.Prediction:
+        """Calculate total experience."""
+        return self.calculator(work_history=work_history)
+
+
+# ============================================================================
+# SECTION DETECTION MODULE
+# ============================================================================
+
+class CVSectionDetector(dspy.Module):
+    """Detect sections in CV."""
+
+    def __init__(self):
+        super().__init__()
+        self.detector = dspy.ChainOfThought(CVSectionDetection)
+
+    def forward(self, cv_text: str) -> dspy.Prediction:
+        """Detect CV sections."""
+        return self.detector(cv_text=cv_text)
+
+
+# ============================================================================
+# COMPOSITE MODULES
+# ============================================================================
+
+class ComprehensiveCVExtractor(dspy.Module):
+    """
+    Comprehensive CV extractor that orchestrates all extraction modules.
+
+    This is a high-level module that coordinates extraction of all CV components.
+    """
+
+    def __init__(
+        self,
+        with_evidence: bool = False,
+        with_hr_insights: bool = True,
+        strict_mode: bool = False,
+        industry_domain: Optional[str] = None,
+    ):
+        super().__init__()
+
+        # Initialize sub-modules
+        self.section_detector = CVSectionDetector()
+        self.personal_info_extractor = PersonalInfoExtractor(strict_mode=strict_mode)
+        self.summary_extractor = ProfessionalSummaryExtractor()
+        self.work_exp_extractor = BatchWorkExperienceExtractor(with_evidence=with_evidence)
+        self.education_extractor = BatchEducationExtractor(with_evidence=with_evidence)
+        self.technical_skills_extractor = TechnicalSkillsExtractor()
+        self.skills_proficiency_extractor = SkillsWithProficiencyExtractor()
+        self.certification_extractor = CertificationListExtractor()
+        self.division_classifier = DivisionClassifier()
+        self.experience_calculator = TotalExperienceCalculator()
+
+        # HR Insights modules (optional)
+        self.with_hr_insights = with_hr_insights
+        if with_hr_insights:
+            self.career_analyzer = CareerProgressionAnalyzer()
+            self.job_hopping_detector = JobHoppingDetector()
+            self.red_flag_detector = RedFlagDetector()
+            self.quality_scorer = QualityScorer()
+            self.strengths_extractor = KeyStrengthsExtractor()
+
+        # Domain skills extractor (optional)
+        self.industry_domain = industry_domain
+        if industry_domain:
+            self.domain_skills_extractor = DomainSkillsExtractor()
+
+    def forward(
+        self,
+        cv_text: str,
+        personal_section: Optional[str] = None,
+        summary_section: Optional[str] = None,
+        work_entries: Optional[List[str]] = None,
+        education_entries: Optional[List[str]] = None,
+        skills_section: Optional[str] = None,
+        available_divisions: str = "technology,insurance_operations,finance,hr,legal",
+    ) -> Dict[str, Any]:
+        """
+        Extract all information from CV.
+
+        Args:
+            cv_text: Full CV text
+            personal_section: Personal info section (if pre-split)
+            summary_section: Summary section (if pre-split)
+            work_entries: Work experience entries (if pre-split)
+            education_entries: Education entries (if pre-split)
+            skills_section: Skills section (if pre-split)
+            available_divisions: Comma-separated division options
+
+        Returns:
+            Dictionary with all extracted information
+        """
+        results = {}
+
+        # Step 1: Detect sections if not provided
+        if not all([personal_section, work_entries, education_entries]):
+            section_info = self.section_detector(cv_text=cv_text)
+            results["sections_detected"] = section_info
+
+        # Step 2: Extract personal information
+        if personal_section:
+            personal_info = self.personal_info_extractor(personal_section=personal_section)
+        else:
+            # Use first 500 chars as approximation
+            personal_info = self.personal_info_extractor(personal_section=cv_text[:500])
+        results["personal_info"] = personal_info
+
+        # Step 3: Extract professional summary
+        if summary_section:
+            summary = self.summary_extractor(summary_section=summary_section)
+        else:
+            # Use first 1000 chars
+            summary = self.summary_extractor(summary_section=cv_text[:1000])
+        results["professional_summary"] = summary
+
+        # Step 4: Extract work experience
+        if work_entries:
+            work_exp = self.work_exp_extractor(experience_entries=work_entries)
+            results["work_experience"] = work_exp
+        else:
+            results["work_experience"] = []
+
+        # Step 5: Extract education
+        if education_entries:
+            education = self.education_extractor(education_entries=education_entries)
+            results["education"] = education
+        else:
+            results["education"] = []
+
+        # Step 6: Extract skills
+        technical_skills = self.technical_skills_extractor(
+            skills_section=skills_section or cv_text
+        )
+        results["technical_skills"] = technical_skills
+
+        # Skills with proficiency
+        skills_proficiency = self.skills_proficiency_extractor(
+            skills_text=cv_text
+        )
+        results["skills_proficiency"] = skills_proficiency
+
+        # Domain skills (if industry specified)
+        if self.industry_domain:
+            domain_skills = self.domain_skills_extractor(
+                cv_text=cv_text,
+                industry_domain=self.industry_domain
+            )
+            results["domain_skills"] = domain_skills
+
+        # Step 7: Extract certifications
+        certifications = self.certification_extractor(cv_text=cv_text)
+        results["certifications"] = certifications
+
+        # Step 8: Calculate experience
+        # Create work history summary for calculation
+        work_history_summary = " | ".join([
+            f"{exp.job_title} @ {exp.company_name} ({exp.start_date} - {exp.end_date})"
+            for exp in results["work_experience"]
+            if hasattr(exp, 'job_title')
+        ]) if results["work_experience"] else cv_text[:1000]
+
+        total_exp = self.experience_calculator(work_history=work_history_summary)
+        results["total_experience"] = total_exp
+
+        # Step 9: Division classification
+        cv_summary = f"{summary.professional_summary if hasattr(summary, 'professional_summary') else ''} | " \
+                    f"Skills: {technical_skills.programming_languages if hasattr(technical_skills, 'programming_languages') else ''}"
+        division = self.division_classifier(
+            cv_summary=cv_summary,
+            available_divisions=available_divisions
+        )
+        results["division"] = division
+
+        # Step 10: HR Insights (if enabled)
+        if self.with_hr_insights:
+            # Career progression
+            career_prog = self.career_analyzer(work_history=work_history_summary)
+            results["career_progression"] = career_prog
+
+            # Job hopping
+            job_hopping = self.job_hopping_detector(work_history=work_history_summary)
+            results["job_hopping"] = job_hopping
+
+            # Red flags
+            red_flags = self.red_flag_detector(
+                cv_content=cv_text,
+                work_history_summary=work_history_summary
+            )
+            results["red_flags"] = red_flags
+
+            # Quality scoring
+            quality = self.quality_scorer(cv_text=cv_text)
+            results["quality_score"] = quality
+
+            # Key strengths
+            strengths = self.strengths_extractor(cv_text=cv_text)
+            results["key_strengths"] = strengths
+
+        # Add metadata
+        results["extraction_metadata"] = {
+            "timestamp": datetime.now().isoformat(),
+            "with_evidence": self.work_exp_extractor.single_extractor.with_evidence,
+            "with_hr_insights": self.with_hr_insights,
+            "industry_domain": self.industry_domain,
+        }
+
+        return results
