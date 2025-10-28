@@ -531,22 +531,11 @@ class CVExtractionPipeline:
 
         skills = []
 
-        # Get technical skills
-        tech_skills = extraction_results.get("technical_skills", {})
-        skills.extend(self._parse_skills_from_field(tech_skills, "programming_languages", SkillCategory.TECHNICAL))
-        skills.extend(self._parse_skills_from_field(tech_skills, "frameworks_libraries", SkillCategory.TECHNICAL))
-        skills.extend(self._parse_skills_from_field(tech_skills, "tools_platforms", SkillCategory.TOOL))
-        skills.extend(self._parse_skills_from_field(tech_skills, "databases", SkillCategory.TECHNICAL))
-        skills.extend(self._parse_skills_from_field(tech_skills, "cloud_services", SkillCategory.TECHNICAL))
+        # Get generic skills from industry-agnostic extractor (List[SkillOutput])
+        generic_skills = extraction_results.get("skills_generic", [])
+        skills.extend(self._parse_generic_skills(generic_skills))
 
-        # Get skills with proficiency
-        proficiency_skills = extraction_results.get("skills_proficiency", {})
-        skills.extend(self._parse_proficiency_skills(proficiency_skills, "expert_skills", ProficiencyLevel.EXPERT))
-        skills.extend(self._parse_proficiency_skills(proficiency_skills, "advanced_skills", ProficiencyLevel.ADVANCED))
-        skills.extend(self._parse_proficiency_skills(proficiency_skills, "intermediate_skills", ProficiencyLevel.INTERMEDIATE))
-        skills.extend(self._parse_proficiency_skills(proficiency_skills, "beginner_skills", ProficiencyLevel.BEGINNER))
-
-        # Get domain skills
+        # Get domain-specific skills if industry was specified
         if "domain_skills" in extraction_results:
             domain_skills = extraction_results["domain_skills"]
             skills.extend(self._parse_skills_from_field(domain_skills, "domain_expertise", SkillCategory.DOMAIN))
@@ -586,6 +575,65 @@ class CVExtractionPipeline:
 
         return list(unique_skills.values())
 
+    def _parse_generic_skills(self, skill_outputs: List[Any]) -> List[Skill]:
+        """Parse skills from new generic SkillOutput format."""
+        from src.models.cv_schema import ProficiencyLevel
+
+        skills = []
+
+        # Map string categories to SkillCategory enum
+        category_map = {
+            'technical': SkillCategory.TECHNICAL,
+            'soft': SkillCategory.SOFT,
+            'language': SkillCategory.LANGUAGE,
+            'industry': SkillCategory.DOMAIN,
+            'tool': SkillCategory.TOOL,
+            'certification': SkillCategory.DOMAIN,  # Map certification to domain
+            'other': SkillCategory.DOMAIN  # Map other to domain as fallback
+        }
+
+        # Map proficiency strings to enum
+        proficiency_map = {
+            'expert': ProficiencyLevel.EXPERT,
+            'advanced': ProficiencyLevel.ADVANCED,
+            'intermediate': ProficiencyLevel.INTERMEDIATE,
+            'beginner': ProficiencyLevel.BEGINNER
+        }
+
+        for skill_output in skill_outputs:
+            try:
+                # Get attributes (handles both dict and object)
+                if isinstance(skill_output, dict):
+                    skill_name = skill_output.get('skill_name', '')
+                    category_raw = skill_output.get('category', 'other')
+                    proficiency_raw = skill_output.get('proficiency_level', '')
+                else:
+                    skill_name = getattr(skill_output, 'skill_name', '')
+                    category_raw = getattr(skill_output, 'category', 'other')
+                    proficiency_raw = getattr(skill_output, 'proficiency_level', '')
+
+                if not skill_name or skill_name == 'None':
+                    continue
+
+                # Safely handle None values
+                category_str = category_raw.lower() if category_raw else 'other'
+                proficiency_str = proficiency_raw.lower() if proficiency_raw else ''
+
+                # Map to enums (default to DOMAIN if category not found)
+                category = category_map.get(category_str, SkillCategory.DOMAIN)
+                proficiency = proficiency_map.get(proficiency_str) if proficiency_str else None
+
+                skill = Skill(
+                    name=skill_name.strip(),
+                    category=category,
+                    proficiency_level=proficiency
+                )
+                skills.append(skill)
+            except Exception as e:
+                logger.warning(f"Failed to parse skill: {e}")
+
+        return skills
+
     def _parse_skills_from_field(
         self,
         result: Any,
@@ -600,28 +648,6 @@ class CVExtractionPipeline:
         skill_names = self._parse_list(field_value)
         return [
             Skill(name=name.strip(), category=category)
-            for name in skill_names
-            if name.strip()
-        ]
-
-    def _parse_proficiency_skills(
-        self,
-        result: Any,
-        field_name: str,
-        proficiency: ProficiencyLevel,
-    ) -> List[Skill]:
-        """Parse skills with proficiency level."""
-        field_value = getattr(result, field_name, None)
-        if not field_value or field_value == "None":
-            return []
-
-        skill_names = self._parse_list(field_value)
-        return [
-            Skill(
-                name=name.strip(),
-                category=SkillCategory.TECHNICAL,
-                proficiency_level=proficiency
-            )
             for name in skill_names
             if name.strip()
         ]

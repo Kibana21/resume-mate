@@ -38,6 +38,13 @@ class EducationOutput(BaseModel):
     honors: List[str] = Field(default_factory=list, description="Honors and awards")
 
 
+class SkillOutput(BaseModel):
+    """Generic skill for any industry."""
+    skill_name: str = Field(..., description="Name of the skill")
+    category: str = Field(..., description="Category: 'technical', 'soft', 'language', 'industry', 'tool', 'certification', or 'other'")
+    proficiency_level: Optional[str] = Field(None, description="Proficiency level if mentioned: 'expert', 'advanced', 'intermediate', 'beginner'")
+
+
 # ============================================================================
 # PERSONAL INFORMATION EXTRACTION
 # ============================================================================
@@ -284,8 +291,30 @@ class EducationListExtraction(dspy.Signature):
 # SKILLS EXTRACTION
 # ============================================================================
 
+class SkillsExtraction(dspy.Signature):
+    """Extract ALL skills from CV - technical, soft skills, tools, languages, industry-specific skills, etc."""
+
+    cv_text: str = dspy.InputField(
+        desc="Full CV text or skills section"
+    )
+
+    skills: List[SkillOutput] = dspy.OutputField(
+        desc="""List of all skills found in CV with categorization:
+        - technical: Programming languages, frameworks, methodologies (e.g., Java, Agile, Machine Learning)
+        - soft: Communication, Leadership, Teamwork, Problem-solving, Negotiation
+        - language: Spoken languages (e.g., English, Spanish, Mandarin)
+        - industry: Domain-specific knowledge (e.g., Banking, Healthcare, Legal, Insurance)
+        - tool: Software tools and platforms (e.g., Excel, JIRA, Salesforce, AutoCAD)
+        - certification: Professional certifications mentioned as skills
+        - other: Any other relevant skills
+        Include proficiency_level if explicitly mentioned (expert/advanced/intermediate/beginner).
+        Return empty list if no skills found."""
+    )
+
+
+# Keep old signature for backward compatibility
 class TechnicalSkillsExtraction(dspy.Signature):
-    """Extract technical skills from CV section."""
+    """DEPRECATED: Use SkillsExtraction instead. Extract technical skills from CV section."""
 
     skills_section: str = dspy.InputField(
         desc="Skills section or full CV text"

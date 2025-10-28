@@ -220,8 +220,29 @@ class EducationListExtractor(dspy.Module):
 # SKILLS MODULE
 # ============================================================================
 
+class SkillsExtractor(dspy.Module):
+    """Extract ALL skills (technical, soft, tools, languages, industry-specific) using Pydantic models."""
+
+    def __init__(self):
+        super().__init__()
+        from src.dspy_modules.cv_signatures import SkillsExtraction
+        self.extractor = dspy.ChainOfThought(SkillsExtraction)
+
+    def forward(self, cv_text: str) -> dspy.Prediction:
+        """
+        Extract all skills from CV.
+
+        Args:
+            cv_text: Full CV text or skills section
+
+        Returns:
+            DSPy Prediction with skills attribute (List[SkillOutput])
+        """
+        return self.extractor(cv_text=cv_text)
+
+
 class TechnicalSkillsExtractor(dspy.Module):
-    """Extract technical skills."""
+    """DEPRECATED: Use SkillsExtractor instead. Extract technical skills."""
 
     def __init__(self):
         super().__init__()
@@ -478,8 +499,7 @@ class ComprehensiveCVExtractor(dspy.Module):
         self.work_exp_list_extractor = WorkExperienceListExtractor()
         self.education_extractor = BatchEducationExtractor(with_evidence=with_evidence)
         self.education_list_extractor = EducationListExtractor()
-        self.technical_skills_extractor = TechnicalSkillsExtractor()
-        self.skills_proficiency_extractor = SkillsWithProficiencyExtractor()
+        self.skills_extractor = SkillsExtractor()  # Generic industry-agnostic skills extractor
         self.certification_extractor = CertificationListExtractor()
         self.division_classifier = DivisionClassifier()
         self.experience_calculator = TotalExperienceCalculator()
@@ -604,17 +624,10 @@ class ComprehensiveCVExtractor(dspy.Module):
             results["education"] = education_list
             results["education_raw"] = education_list  # Store raw extraction
 
-        # Step 6: Extract skills
-        technical_skills = self.technical_skills_extractor(
-            skills_section=skills_section or cv_text
-        )
-        results["technical_skills"] = technical_skills
-
-        # Skills with proficiency
-        skills_proficiency = self.skills_proficiency_extractor(
-            skills_text=cv_text
-        )
-        results["skills_proficiency"] = skills_proficiency
+        # Step 6: Extract skills using generic industry-agnostic extractor (returns List[SkillOutput] directly)
+        skills_result = self.skills_extractor(cv_text=cv_text)
+        skills_list = getattr(skills_result, "skills", [])
+        results["skills_generic"] = skills_list
 
         # Domain skills (if industry specified)
         if self.industry_domain:
@@ -649,34 +662,18 @@ class ComprehensiveCVExtractor(dspy.Module):
         results["total_experience"] = total_exp
 
         # Step 8.5: Analyze skill proficiency (after total experience is calculated)
-        # Collect all skills into a flat list
+        # Collect all skills from generic skills extractor
         all_skills = set()
 
-        # From technical skills (use correct field names from TechnicalSkillsExtraction signature)
-        if hasattr(technical_skills, 'programming_languages'):
-            langs = getattr(technical_skills, 'programming_languages', '')
-            if langs and langs.lower() != 'none':
-                all_skills.update([s.strip() for s in langs.split(',') if s.strip()])
+        # Extract skill names from generic skills list (List[SkillOutput])
+        for skill_output in skills_list:
+            if isinstance(skill_output, dict):
+                skill_name = skill_output.get('skill_name', '')
+            else:
+                skill_name = getattr(skill_output, 'skill_name', '')
 
-        if hasattr(technical_skills, 'frameworks_libraries'):
-            frameworks = getattr(technical_skills, 'frameworks_libraries', '')
-            if frameworks and frameworks.lower() != 'none':
-                all_skills.update([s.strip() for s in frameworks.split(',') if s.strip()])
-
-        if hasattr(technical_skills, 'tools_platforms'):
-            tools = getattr(technical_skills, 'tools_platforms', '')
-            if tools and tools.lower() != 'none':
-                all_skills.update([s.strip() for s in tools.split(',') if s.strip()])
-
-        if hasattr(technical_skills, 'databases'):
-            dbs = getattr(technical_skills, 'databases', '')
-            if dbs and dbs.lower() != 'none':
-                all_skills.update([s.strip() for s in dbs.split(',') if s.strip()])
-
-        if hasattr(technical_skills, 'cloud_services'):
-            cloud = getattr(technical_skills, 'cloud_services', '')
-            if cloud and cloud.lower() != 'none':
-                all_skills.update([s.strip() for s in cloud.split(',') if s.strip()])
+            if skill_name and skill_name.lower() != 'none':
+                all_skills.add(skill_name.strip())
 
         # Extract total years from total_exp result
         total_years = None
@@ -719,8 +716,10 @@ class ComprehensiveCVExtractor(dspy.Module):
             results["skill_proficiency_analysis"] = []
 
         # Step 9: Division classification
+        # Build skills summary from generic skills
+        skills_summary = ", ".join(list(all_skills)[:20]) if all_skills else ""  # Use top 20 skills
         cv_summary = f"{summary.professional_summary if hasattr(summary, 'professional_summary') else ''} | " \
-                    f"Skills: {technical_skills.programming_languages if hasattr(technical_skills, 'programming_languages') else ''}"
+                    f"Skills: {skills_summary}"
         division = self.division_classifier(
             cv_summary=cv_summary,
             available_divisions=available_divisions
