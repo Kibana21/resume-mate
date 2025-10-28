@@ -508,7 +508,7 @@ class CVExtractionPipeline:
                         honors=self._parse_list(edu.get("honors", "")),
                     )
                 else:
-                    # Handle object format
+                    # Handle object format (from Pydantic models)
                     education = Education(
                         institution_name=getattr(edu, "institution_name", "Unknown"),
                         degree=getattr(edu, "degree", "Unknown"),
@@ -517,7 +517,7 @@ class CVExtractionPipeline:
                         end_date=self._parse_date(getattr(edu, "end_date", None)),
                         is_current=self._is_current(getattr(edu, "end_date", None)),
                         gpa=self._parse_gpa(getattr(edu, "gpa", None)),
-                        honors=self._parse_list(getattr(edu, "honors", "")),
+                        honors=self._parse_list(getattr(edu, "honors", [])),
                     )
                 educations.append(education)
             except Exception as e:

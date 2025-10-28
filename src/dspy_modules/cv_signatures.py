@@ -27,6 +27,17 @@ class WorkExperienceOutput(BaseModel):
     technologies_used: List[str] = Field(default_factory=list, description="Technologies")
 
 
+class EducationOutput(BaseModel):
+    """Simplified education for DSPy output with string dates."""
+    institution_name: str = Field(..., description="University/school name")
+    degree: str = Field(..., description="Degree type (e.g., Bachelor of Science, MBA)")
+    field_of_study: Optional[str] = Field(None, description="Major/specialization")
+    start_date: Optional[str] = Field(None, description="Start date (YYYY or YYYY-MM)")
+    end_date: Optional[str] = Field(None, description="End date (YYYY or YYYY-MM, or Present)")
+    gpa: Optional[str] = Field(None, description="GPA (e.g., 3.8/4.0)")
+    honors: List[str] = Field(default_factory=list, description="Honors and awards")
+
+
 # ============================================================================
 # PERSONAL INFORMATION EXTRACTION
 # ============================================================================
@@ -257,27 +268,15 @@ class EducationWithEvidence(dspy.Signature):
 
 
 class EducationListExtraction(dspy.Signature):
-    """Extract ALL education entries from full CV text.
-
-    Identify and extract each education entry as a structured JSON object.
-    """
+    """Extract ALL education entries from full CV text."""
 
     cv_text: str = dspy.InputField(
         desc="Full CV text containing education section"
     )
 
-    education_entries_json: str = dspy.OutputField(
-        desc="""JSON array of education objects. Each object must have:
-        {
-          "institution_name": "university/school name",
-          "degree": "degree type (e.g., Bachelor of Science, MBA)",
-          "field_of_study": "major/specialization",
-          "start_date": "YYYY or YYYY-MM (normalize: Summer→06, Fall→09, Winter→12, Spring→03) or None",
-          "end_date": "YYYY or YYYY-MM (normalize: Summer→06, Fall→09, Winter→12, Spring→03) or Present or None",
-          "gpa": "X.X/Y.Y or None",
-          "honors": "honor1, honor2 or None"
-        }
-        Return empty array [] if no education found."""
+    education_entries: List[EducationOutput] = dspy.OutputField(
+        desc="""List of education objects with institution_name, degree, field_of_study, dates (YYYY or YYYY-MM format, normalize seasons: Summer→06, Fall→09, Winter→12, Spring→03), gpa, and honors (list).
+        Return empty list if no education found."""
     )
 
 

@@ -196,13 +196,13 @@ class BatchEducationExtractor(dspy.Module):
 
 
 class EducationListExtractor(dspy.Module):
-    """Extract ALL education entries from full CV text."""
+    """Extract ALL education entries from full CV text using Pydantic models."""
 
     def __init__(self):
         super().__init__()
         self.extractor = dspy.ChainOfThought(EducationListExtraction)
 
-    def forward(self, cv_text: str) -> List[Dict[str, Any]]:
+    def forward(self, cv_text: str) -> dspy.Prediction:
         """
         Extract all education from full CV text.
 
@@ -210,30 +210,10 @@ class EducationListExtractor(dspy.Module):
             cv_text: Full CV text
 
         Returns:
-            List of education dictionaries
+            DSPy Prediction with education_entries attribute (List[EducationOutput])
         """
-        import json
-
         result = self.extractor(cv_text=cv_text)
-
-        # Parse JSON output
-        try:
-            education_entries = json.loads(result.education_entries_json)
-            if not isinstance(education_entries, list):
-                return []
-            return education_entries
-        except json.JSONDecodeError:
-            # Try to extract JSON from the text
-            import re
-            json_match = re.search(r'\[.*\]', result.education_entries_json, re.DOTALL)
-            if json_match:
-                try:
-                    education_entries = json.loads(json_match.group())
-                    if isinstance(education_entries, list):
-                        return education_entries
-                except json.JSONDecodeError:
-                    pass
-            return []
+        return result
 
 
 # ============================================================================
@@ -618,8 +598,9 @@ class ComprehensiveCVExtractor(dspy.Module):
             education = self.education_extractor(education_entries=education_entries)
             results["education"] = education
         else:
-            # Use list extractor to find education from full CV
-            education_list = self.education_list_extractor(cv_text=cv_text)
+            # Use list extractor to find education from full CV (returns List[EducationOutput] directly)
+            education_result = self.education_list_extractor(cv_text=cv_text)
+            education_list = getattr(education_result, "education_entries", [])
             results["education"] = education_list
             results["education_raw"] = education_list  # Store raw extraction
 
