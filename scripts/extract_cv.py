@@ -22,7 +22,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import init_dspy
 from src.pipelines import CVExtractionPipeline
-from src.preprocessing import get_file_info
+from src.preprocessing import get_file_info, is_azure_document_intelligence_available, parse_pdf_via_images
+
+
+def get_raw_markdown_from_cv(cv_file_path: str) -> str:
+    """Extract raw markdown from CV using Azure Document Intelligence."""
+    if is_azure_document_intelligence_available() and cv_file_path.endswith('.pdf'):
+        try:
+            markdown_content = parse_pdf_via_images(cv_file_path)
+            return markdown_content
+        except Exception as e:
+            print(f"⚠️  Could not extract markdown: {e}")
+            return ""
+    return ""
 
 
 def main():
@@ -145,6 +157,8 @@ def main():
         print(f"   Location: {candidate_profile.personal_info.location}")
     if candidate_profile.personal_info.linkedin_url:
         print(f"   LinkedIn: {candidate_profile.personal_info.linkedin_url}")
+    if candidate_profile.personal_info.visa_status:
+        print(f"   Visa Status: {candidate_profile.personal_info.visa_status}")
     print()
 
     # Experience Summary
@@ -231,11 +245,15 @@ def main():
 
         if candidate_profile.red_flags:
             print("⚠️  Red Flags:")
-            # Wrap long text
-            import textwrap
-            wrapped = textwrap.fill(candidate_profile.red_flags, width=76,
-                                   initial_indent="   ", subsequent_indent="   ")
-            print(wrapped)
+            for i, flag in enumerate(candidate_profile.red_flags, 1):
+                severity_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+                emoji = severity_emoji.get(flag.severity.value, "⚠️")
+                print(f"   {emoji} [{flag.severity.value.upper()}] {flag.category}")
+                # Wrap long description
+                import textwrap
+                wrapped_desc = textwrap.fill(flag.description, width=72,
+                                            initial_indent="      ", subsequent_indent="      ")
+                print(wrapped_desc)
             print()
 
         print("=" * 80)
@@ -261,10 +279,19 @@ def main():
             }
         }
 
+        # Save JSON
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(result_dict, f, indent=2, default=str)
 
-        print(f"💾 Results saved to: {output_path}")
+        print(f"💾 JSON saved to: {output_path}")
+
+        # Also save raw markdown from Azure Document Intelligence
+        raw_markdown = get_raw_markdown_from_cv(str(cv_file))
+        if raw_markdown:
+            md_path = output_path.with_suffix('.md')
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(raw_markdown)
+            print(f"📄 Markdown saved to: {md_path}")
         print()
 
     print("=" * 80)

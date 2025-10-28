@@ -7,6 +7,24 @@ Each signature specifies what inputs the LLM receives and what outputs it should
 
 import dspy
 from typing import List, Optional
+from pydantic import BaseModel, Field
+from src.models.cv_schema import RedFlag
+
+
+# ============================================================================
+# SIMPLIFIED OUTPUT MODELS (for DSPy with string dates)
+# ============================================================================
+
+class WorkExperienceOutput(BaseModel):
+    """Simplified work experience for DSPy output with string dates."""
+    company_name: str = Field(..., description="Company name")
+    job_title: str = Field(..., description="Job title")
+    start_date: Optional[str] = Field(None, description="Start date (YYYY-MM or YYYY)")
+    end_date: Optional[str] = Field(None, description="End date (YYYY-MM, YYYY, or Present)")
+    location: Optional[str] = Field(None, description="Location")
+    responsibilities: List[str] = Field(default_factory=list, description="Responsibilities")
+    achievements: List[str] = Field(default_factory=list, description="Achievements")
+    technologies_used: List[str] = Field(default_factory=list, description="Technologies")
 
 
 # ============================================================================
@@ -14,10 +32,10 @@ from typing import List, Optional
 # ============================================================================
 
 class PersonalInfoExtraction(dspy.Signature):
-    """Extract personal and contact information from CV section."""
+    """Extract personal and contact information from CV. Search the entire text carefully - contact info may appear anywhere (header, footer, middle of document, or embedded in content)."""
 
     personal_section: str = dspy.InputField(
-        desc="Personal information section text from CV"
+        desc="Text from CV containing personal information. Search thoroughly as email/phone may appear in footer, after work history, or anywhere in the document."
     )
 
     full_name: str = dspy.OutputField(
@@ -42,6 +60,10 @@ class PersonalInfoExtraction(dspy.Signature):
 
     github_url: str = dspy.OutputField(
         desc="GitHub profile URL (or 'None' if not found)"
+    )
+
+    visa_status: str = dspy.OutputField(
+        desc="Visa or work authorization status if mentioned (e.g., 'Permanent Residence', 'PR', 'Work Permit', 'Citizen', 'Green Card', etc.) (or 'None' if not found)"
     )
 
 
@@ -150,28 +172,15 @@ class WorkExperienceWithEvidence(dspy.Signature):
 
 
 class WorkExperienceListExtraction(dspy.Signature):
-    """Extract ALL work experience entries from full CV text.
-
-    Identify and extract each work experience entry as a structured JSON object.
-    """
+    """Extract ALL work experience entries from full CV text."""
 
     cv_text: str = dspy.InputField(
         desc="Full CV text containing work experience section"
     )
 
-    work_experiences_json: str = dspy.OutputField(
-        desc="""JSON array of work experience objects. Each object must have:
-        {
-          "company_name": "company name",
-          "job_title": "job title",
-          "start_date": "YYYY-MM or YYYY (normalize: Summer→06, Fall→09, Winter→12, Spring→03)",
-          "end_date": "YYYY-MM or YYYY or Present (normalize: Summer→06, Fall→09, Winter→12, Spring→03)",
-          "location": "city, country or None",
-          "responsibilities": "bullet point 1 | bullet point 2 | ...",
-          "achievements": "achievement 1 | achievement 2 | ... or None",
-          "technologies": "tech1, tech2, tech3 or None"
-        }
-        Return empty array [] if no work experience found."""
+    work_experiences: List[WorkExperienceOutput] = dspy.OutputField(
+        desc="""List of work experience objects with company_name, job_title, dates (YYYY-MM format, normalize seasons: Summer→06, Fall→09, Winter→12, Spring→03), location, responsibilities (list), achievements (list), and technologies_used (list).
+        Return empty list if no work experience found."""
     )
 
 
@@ -523,12 +532,9 @@ class JobHoppingDetection(dspy.Signature):
         desc="Explanation of job hopping pattern if detected (or 'None')"
     )
 
-    employment_gaps: str = dspy.OutputField(
-        desc="Employment gaps found formatted as 'Start to End (X months)' separated by ' | ' (or 'None')"
-    )
-
-    gap_explanations: str = dspy.OutputField(
-        desc="Explanations for gaps if found in CV (or 'None')"
+    employment_gaps_json: str = dspy.OutputField(
+        desc="""JSON array of employment gaps formatted as strings like '2006-01 to 2006-02 (1 month)'.
+        Return empty array [] if no gaps. Example: ["2006-01 to 2006-02 (1 month)", "2010-06 to 2010-09 (3 months)"]"""
     )
 
 
@@ -543,16 +549,10 @@ class RedFlagDetection(dspy.Signature):
         desc="Summary of work history with key dates and transitions"
     )
 
-    red_flags: str = dspy.OutputField(
-        desc="Red flags detected formatted as 'Flag Type: Description' separated by ' | ' (or 'None' if no flags)"
-    )
-
-    severity_levels: str = dspy.OutputField(
-        desc="Severity for each red flag: 'Critical', 'High', 'Medium', 'Low', or 'Info' - comma-separated matching order of red_flags"
-    )
-
-    recommendations: str = dspy.OutputField(
-        desc="Recommendations for recruiter on how to address each flag - separated by ' | '"
+    red_flags: List[RedFlag] = dspy.OutputField(
+        desc="""List of red flag objects with category, description, and severity (high/medium/low).
+        Categories: 'Employment Gap', 'Frequent Job Changes', 'Lack of Progression', etc.
+        Return empty list if no red flags found."""
     )
 
 

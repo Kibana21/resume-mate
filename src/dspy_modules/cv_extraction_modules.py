@@ -138,13 +138,13 @@ class BatchWorkExperienceExtractor(dspy.Module):
 
 
 class WorkExperienceListExtractor(dspy.Module):
-    """Extract ALL work experience entries from full CV text."""
+    """Extract ALL work experience entries from full CV text using Pydantic models."""
 
     def __init__(self):
         super().__init__()
         self.extractor = dspy.ChainOfThought(WorkExperienceListExtraction)
 
-    def forward(self, cv_text: str) -> List[Dict[str, Any]]:
+    def forward(self, cv_text: str) -> dspy.Prediction:
         """
         Extract all work experience from full CV text.
 
@@ -152,30 +152,10 @@ class WorkExperienceListExtractor(dspy.Module):
             cv_text: Full CV text
 
         Returns:
-            List of work experience dictionaries
+            DSPy Prediction with work_experiences attribute (List[WorkExperience])
         """
-        import json
-
         result = self.extractor(cv_text=cv_text)
-
-        # Parse JSON output
-        try:
-            work_experiences = json.loads(result.work_experiences_json)
-            if not isinstance(work_experiences, list):
-                return []
-            return work_experiences
-        except json.JSONDecodeError:
-            # Try to extract JSON from the text
-            import re
-            json_match = re.search(r'\[.*\]', result.work_experiences_json, re.DOTALL)
-            if json_match:
-                try:
-                    work_experiences = json.loads(json_match.group())
-                    if isinstance(work_experiences, list):
-                        return work_experiences
-                except json.JSONDecodeError:
-                    pass
-            return []
+        return result
 
 
 # ============================================================================
@@ -580,8 +560,9 @@ class ComprehensiveCVExtractor(dspy.Module):
         if personal_section:
             personal_info = self.personal_info_extractor(personal_section=personal_section)
         else:
-            # Use first 500 chars as approximation
-            personal_info = self.personal_info_extractor(personal_section=cv_text[:500])
+            # Pass first 4000 chars to capture contact info that may appear later in document
+            # (some CVs have contact info in footer, after work history, or embedded in content)
+            personal_info = self.personal_info_extractor(personal_section=cv_text[:4000])
         results["personal_info"] = personal_info
 
         # Step 3: Extract professional summary
@@ -597,8 +578,9 @@ class ComprehensiveCVExtractor(dspy.Module):
             work_exp = self.work_exp_extractor(experience_entries=work_entries)
             results["work_experience"] = work_exp
         else:
-            # Use list extractor to find work experience from full CV
-            work_exp_list = self.work_exp_list_extractor(cv_text=cv_text)
+            # Use list extractor to find work experience from full CV (returns List[WorkExperience] directly)
+            work_exp_result = self.work_exp_list_extractor(cv_text=cv_text)
+            work_exp_list = getattr(work_exp_result, "work_experiences", [])
             results["work_experience"] = work_exp_list
             results["work_experience_raw"] = work_exp_list  # Store raw extraction
 

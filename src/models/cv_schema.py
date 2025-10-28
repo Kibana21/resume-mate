@@ -85,6 +85,57 @@ class ImpactCategory(str, Enum):
     RISK_MITIGATION = "risk_mitigation"
 
 
+class CareerTrajectory(str, Enum):
+    """Career progression trajectory"""
+    UPWARD = "upward"
+    STAGNANT = "stagnant"
+    MIXED = "mixed"
+    EARLY_CAREER = "early_career"
+    DOWNWARD = "downward"
+
+
+class ProgressionRate(str, Enum):
+    """Career progression rate"""
+    RAPID = "rapid"
+    MODERATE = "moderate"
+    SLOW = "slow"
+    NONE = "none"
+
+
+class RedFlagSeverity(str, Enum):
+    """Severity level for red flags"""
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+# ============================================================================
+# HR INSIGHTS MODELS
+# ============================================================================
+
+class CareerProgressionAnalysis(BaseModel):
+    """Structured career progression analysis"""
+    trajectory: Optional[CareerTrajectory] = Field(None, description="Overall career trajectory")
+    progression_rate: Optional[ProgressionRate] = Field(None, description="Rate of career advancement")
+    number_of_promotions: int = Field(default=0, description="Number of promotions or role advancements", ge=0)
+    average_tenure_months: Optional[int] = Field(None, description="Average months per role", ge=0)
+    summary: str = Field(..., description="Detailed analysis of career progression")
+
+
+class JobHoppingAssessment(BaseModel):
+    """Structured job hopping assessment"""
+    is_job_hopper: bool = Field(default=False, description="Whether candidate exhibits job hopping behavior")
+    details: Optional[str] = Field(None, description="Details about job hopping patterns")
+    employment_gaps: List[str] = Field(default_factory=list, description="List of employment gaps (e.g., '2006-01 to 2006-02 (1 month)')")
+
+
+class RedFlag(BaseModel):
+    """Individual red flag with severity"""
+    category: str = Field(..., description="Category of red flag (e.g., 'Frequent Job Changes', 'Employment Gap')")
+    description: str = Field(..., description="Detailed description of the red flag")
+    severity: RedFlagSeverity = Field(..., description="Severity level of this red flag")
+
+
 # ============================================================================
 # PERSONAL INFORMATION MODELS
 # ============================================================================
@@ -145,6 +196,12 @@ class PersonalInfo(BaseModel):
     visa_sponsorship_required: Optional[bool] = Field(
         None,
         description="Whether candidate requires visa sponsorship"
+    )
+
+    visa_status: Optional[str] = Field(
+        None,
+        description="Current visa/work authorization status (e.g., 'Permanent Residence', 'Work Permit', 'Citizen', etc.)",
+        max_length=100
     )
 
 
@@ -759,20 +816,20 @@ class CandidateProfile(BaseModel):
         description="Secondary AIA divisions where candidate could fit"
     )
 
-    # HR Insights
-    career_progression_analysis: Optional[str] = Field(
+    # HR Insights (Structured)
+    career_progression_analysis: Optional[CareerProgressionAnalysis] = Field(
         None,
-        description="Analysis of career progression and growth trajectory"
+        description="Structured analysis of career progression and growth trajectory"
     )
 
-    job_hopping_assessment: Optional[str] = Field(
+    job_hopping_assessment: Optional[JobHoppingAssessment] = Field(
         None,
-        description="Assessment of job stability and tenure patterns"
+        description="Structured assessment of job stability and tenure patterns"
     )
 
-    red_flags: Optional[str] = Field(
-        None,
-        description="Potential concerns or red flags identified in CV"
+    red_flags: List[RedFlag] = Field(
+        default_factory=list,
+        description="List of potential concerns or red flags identified in CV"
     )
 
     quality_score: Optional[float] = Field(

@@ -229,6 +229,7 @@ class CVExtractionPipeline:
             location=self._clean_field(getattr(personal_info_result, "location", None)),
             linkedin_url=self._clean_field(getattr(personal_info_result, "linkedin_url", None)),
             github_url=self._clean_field(getattr(personal_info_result, "github_url", None)),
+            visa_status=self._clean_field(getattr(personal_info_result, "visa_status", None)),
             professional_summary=self._get_professional_summary(extraction_results),
         )
 
@@ -253,50 +254,96 @@ class CVExtractionPipeline:
         summary_result = extraction_results.get("professional_summary", {})
         career_level = getattr(summary_result, "career_level", None)
 
-        # Extract HR insights if available
+        # Extract HR insights if available (structured objects)
+        from src.models.cv_schema import (
+            CareerProgressionAnalysis, JobHoppingAssessment, RedFlag,
+            CareerTrajectory, ProgressionRate, RedFlagSeverity
+        )
+
         career_progression = None
         job_hopping = None
-        red_flags_text = None
+        red_flags_list = []
         quality_score_value = None
         key_strengths_text = None
 
         if self.with_hr_insights:
-            # Career progression - build summary from multiple fields
+            # Career progression - create structured object
             career_prog_result = extraction_results.get("career_progression", {})
             if career_prog_result:
-                trajectory = getattr(career_prog_result, "trajectory", "Unknown")
-                rate = getattr(career_prog_result, "progression_rate", "Unknown")
-                promotions = getattr(career_prog_result, "number_of_promotions", "0")
-                tenure = getattr(career_prog_result, "average_tenure_months", "Unknown")
+                trajectory_str = getattr(career_prog_result, "trajectory", "").lower()
+                rate_str = getattr(career_prog_result, "progression_rate", "").lower()
+                promotions_str = getattr(career_prog_result, "number_of_promotions", "0")
+                tenure_str = getattr(career_prog_result, "average_tenure_months", "0")
                 summary = getattr(career_prog_result, "summary", "")
 
-                career_progression = f"Trajectory: {trajectory} | Progression Rate: {rate} | Promotions: {promotions} | Avg Tenure: {tenure} months | {summary}"
-            else:
-                career_progression = None
+                # Map strings to enums
+                trajectory_map = {
+                    'upward': CareerTrajectory.UPWARD,
+                    'stagnant': CareerTrajectory.STAGNANT,
+                    'mixed': CareerTrajectory.MIXED,
+                    'early career': CareerTrajectory.EARLY_CAREER,
+                    'downward': CareerTrajectory.DOWNWARD
+                }
+                rate_map = {
+                    'rapid': ProgressionRate.RAPID,
+                    'fast': ProgressionRate.RAPID,
+                    'moderate': ProgressionRate.MODERATE,
+                    'slow': ProgressionRate.SLOW,
+                    'none': ProgressionRate.NONE
+                }
 
-            # Job hopping - build assessment from multiple fields
+                try:
+                    career_progression = CareerProgressionAnalysis(
+                        trajectory=trajectory_map.get(trajectory_str),
+                        progression_rate=rate_map.get(rate_str),
+                        number_of_promotions=int(promotions_str) if promotions_str.isdigit() else 0,
+                        average_tenure_months=int(tenure_str) if tenure_str.isdigit() else None,
+                        summary=summary
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create CareerProgressionAnalysis: {e}")
+                    career_progression = None
+
+            # Job hopping - create structured object
             job_hopping_result = extraction_results.get("job_hopping", {})
             if job_hopping_result:
-                is_hopping = getattr(job_hopping_result, "is_job_hopping", "Unknown")
+                is_hopping_str = getattr(job_hopping_result, "is_job_hopping", "No")
                 details = getattr(job_hopping_result, "job_hopping_details", "")
-                gaps = getattr(job_hopping_result, "employment_gaps", "None")
+                gaps_json_str = getattr(job_hopping_result, "employment_gaps_json", "[]")
 
-                job_hopping = f"Job Hopping: {is_hopping} | Details: {details} | Employment Gaps: {gaps}"
-            else:
-                job_hopping = None
+                # Parse employment gaps JSON
+                try:
+                    import json
+                    gaps_list = json.loads(gaps_json_str) if gaps_json_str else []
+                except json.JSONDecodeError:
+                    # Fallback to old format if JSON parsing fails
+                    gaps_old = getattr(job_hopping_result, "employment_gaps", "None")
+                    gaps_list = [g.strip() for g in gaps_old.split('|') if g.strip() and g.strip().lower() != 'none']
 
-            # Red flags
+                try:
+                    job_hopping = JobHoppingAssessment(
+                        is_job_hopper=is_hopping_str.lower() in ['yes', 'true'],
+                        details=details if details and details.lower() != 'none' else None,
+                        employment_gaps=gaps_list
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create JobHoppingAssessment: {e}")
+                    job_hopping = None
+
+            # Red flags - DSPy now returns List[RedFlag] directly
             red_flags_result = extraction_results.get("red_flags", {})
+            logger.info(f"Red flags result type: {type(red_flags_result)}")
             if red_flags_result:
-                flags = getattr(red_flags_result, "red_flags", None)
-                severity = getattr(red_flags_result, "severity_levels", "")
+                # Get the red_flags attribute (List[RedFlag] from DSPy)
+                red_flags_from_dspy = getattr(red_flags_result, "red_flags", [])
 
-                if flags:
-                    red_flags_text = f"{flags} | Severity: {severity}" if severity else flags
+                if isinstance(red_flags_from_dspy, list):
+                    # DSPy returns RedFlag objects directly
+                    red_flags_list = red_flags_from_dspy
+                    logger.info(f"Received {len(red_flags_list)} red flags from DSPy")
                 else:
-                    red_flags_text = None
-            else:
-                red_flags_text = None
+                    logger.warning(f"Unexpected type for red_flags: {type(red_flags_from_dspy)}")
+                    red_flags_list = []
 
             # Quality score - calculate average from multiple scores
             quality_result = extraction_results.get("quality_score", {})
@@ -352,9 +399,9 @@ class CVExtractionPipeline:
             primary_division=primary_division,
             secondary_divisions=secondary_divisions,
             career_level=career_level,
-            career_progression_analysis=career_progression,
-            job_hopping_assessment=job_hopping,
-            red_flags=red_flags_text,
+            career_progression_analysis=career_progression,  # Now CareerProgressionAnalysis object
+            job_hopping_assessment=job_hopping,  # Now JobHoppingAssessment object
+            red_flags=red_flags_list,  # Now List[RedFlag] objects
             quality_score=quality_score_value,
             key_strengths=key_strengths_text,
             metadata=metadata,
@@ -422,7 +469,7 @@ class CVExtractionPipeline:
                         technologies_used=self._parse_list(exp.get("technologies", "")),
                     )
                 else:
-                    # Handle object format
+                    # Handle object format (from Pydantic models)
                     work_exp = WorkExperience(
                         company_name=getattr(exp, "company_name", "Unknown"),
                         job_title=getattr(exp, "job_title", "Unknown"),
@@ -430,10 +477,10 @@ class CVExtractionPipeline:
                         end_date=self._parse_date(getattr(exp, "end_date", None)),
                         is_current=self._is_current(getattr(exp, "end_date", None)),
                         location=self._clean_field(getattr(exp, "location", None)),
-                        responsibilities=self._parse_list(getattr(exp, "responsibilities", "")),
-                        achievements=self._parse_list(getattr(exp, "achievements", "")),
+                        responsibilities=self._parse_list(getattr(exp, "responsibilities", [])),
+                        achievements=self._parse_list(getattr(exp, "achievements", [])),
                         achievement_metrics=achievement_metric_objects,
-                        technologies_used=self._parse_list(getattr(exp, "technologies", "")),
+                        technologies_used=self._parse_list(getattr(exp, "technologies_used", [])),
                     )
                 work_experiences.append(work_exp)
             except Exception as e:
@@ -655,8 +702,13 @@ class CVExtractionPipeline:
             return None
         return str(value).strip()
 
-    def _parse_list(self, value: str, separator: str = " | ") -> List[str]:
-        """Parse a delimited string into a list."""
+    def _parse_list(self, value, separator: str = " | ") -> List[str]:
+        """Parse a delimited string or list into a list."""
+        # Handle case where value is already a list (from Pydantic models)
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if item and str(item).strip() != "None"]
+
+        # Handle string values
         if not value or value == "None":
             return []
 
